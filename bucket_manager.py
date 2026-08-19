@@ -53,6 +53,12 @@ from utils import (
 
 logger = logging.getLogger("ombre_brain.bucket")
 
+# Miss / meaning: a short first-person note about why a memory matters.
+# Keep it as metadata so it can be surfaced on demand without changing the
+# searchable event body or the gateway's recall policy.
+_MEANING_ITEM_MAX = 2000
+_MEANING_LIST_MAX_ITEMS = 50
+
 
 class BucketManager:
     """
@@ -138,6 +144,7 @@ class BucketManager:
         confidence: float | None = None,
         period: str | None = None,
         date: str | None = None,
+        meaning: str | None = None,
         extra_metadata: dict | None = None,
     ) -> str:
         """
@@ -183,6 +190,9 @@ class BucketManager:
             metadata["period"] = str(period)
         if date:
             metadata["date"] = str(date)
+        meaning_item = self._normalize_meaning_item(meaning)
+        if meaning_item:
+            metadata["meaning"] = [meaning_item]
         if pinned:
             metadata["pinned"] = True
         if protected:
@@ -343,6 +353,17 @@ class BucketManager:
             post["period"] = str(kwargs["period"])
         if "date" in kwargs:
             post["date"] = str(kwargs["date"])
+        if "meaning" in kwargs:
+            meaning = self._normalize_meaning_list(kwargs.get("meaning"))
+            if meaning:
+                post["meaning"] = meaning
+            else:
+                post.metadata.pop("meaning", None)
+        if "meaning_append" in kwargs:
+            item = self._normalize_meaning_item(kwargs.get("meaning_append"))
+            if item:
+                current = self._normalize_meaning_list(post.get("meaning") or [])
+                post["meaning"] = self._normalize_meaning_list(current + [item])
         if "comments" in kwargs:
             post["comments"] = kwargs["comments"] if isinstance(kwargs["comments"], list) else []
         if "comment_count" in kwargs:
@@ -410,6 +431,27 @@ class BucketManager:
 
         logger.info(f"Updated bucket / 更新记忆桶: {bucket_id}")
         return True
+
+    @staticmethod
+    def _normalize_meaning_item(value) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()[:_MEANING_ITEM_MAX]
+
+    @classmethod
+    def _normalize_meaning_list(cls, values) -> list[str]:
+        if values is None:
+            return []
+        if isinstance(values, str):
+            values = [values]
+        if not isinstance(values, (list, tuple)):
+            return []
+        result = []
+        for value in values:
+            item = cls._normalize_meaning_item(value)
+            if item and item not in result:
+                result.append(item)
+        return result[-_MEANING_LIST_MAX_ITEMS:]
 
     async def add_comment(
         self,

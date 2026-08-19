@@ -4025,6 +4025,7 @@ async def _merge_or_create(
     memory_layer: str = "",
     memory_classification_source: str = "",
     date: str = "",
+    meaning: str = "",
 ) -> tuple[str, str, bool, dict | None]:
     """
     Check if a similar bucket exists for merging; merge if so, create if not.
@@ -4071,6 +4072,7 @@ async def _merge_or_create(
                     domain=list(set(bucket["metadata"].get("domain", []) + domain)),
                     valence=merged_valence,
                     arousal=merged_arousal,
+                    meaning_append=meaning,
                 )
                 _queue_embedding_refresh(bucket["id"])
                 return bucket["id"], bucket["metadata"].get("name", bucket["id"]), True, related_bucket
@@ -4086,6 +4088,7 @@ async def _merge_or_create(
         arousal=arousal,
         name=name or None,
         date=date or None,
+        meaning=meaning,
         extra_metadata=_memory_classification_metadata(
             memory_subject,
             memory_layer,
@@ -8245,8 +8248,9 @@ async def hold(
     title: str = "",
     date: str = "",
     domain: str = "",
+    meaning: str = "",
 ) -> str:
-    """写一条长期记忆。单个事实/承诺/偏好用 hold；旧记忆的新感受用 comment_bucket；悄悄话用 whisper=True。date 可传事件日期；title 可选，传了就用给定标题，不传则自动生成。普通记忆不用填写 domain，系统会自动判断；维护自我锚点等特殊桶时可显式传 domain。显式 valence/arousal 会覆盖自动情绪。普通记忆 content 的最小写入就是正文；只有确实需要结构化时才按需使用 ### moment、### original、### reflection；reflection 必须写成“我……”第一人称。不要写 ### affect_anchor、### followup 或 ### todo：长期回应变化写进 reflection，到时提醒用 reminder_create。feel=True/whisper=True 时 content 只能写第一人称正文，不写标题或任何 Markdown 分段。"""
+    """写一条长期记忆。单个事实/承诺/偏好用 hold；旧记忆的新感受用 comment_bucket；悄悄话用 whisper=True。date 可传事件日期；title 可选，传了就用给定标题，不传则自动生成。普通记忆不用填写 domain，系统会自动判断；维护自我锚点等特殊桶时可显式传 domain。显式 valence/arousal 会覆盖自动情绪。普通记忆 content 的最小写入就是正文；只有确实需要结构化时才按需使用 ### moment、### original、### reflection；reflection 必须写成“我……”第一人称。不要写 ### affect_anchor、### followup 或 ### todo：长期回应变化写进 reflection，到时提醒用 reminder_create。feel=True/whisper=True 时 content 只能写第一人称正文，不写标题或任何 Markdown 分段。meaning 是可选的第一人称“为什么值得被想起”，只存元数据，不参与普通正文召回。media 等新版字段将在适配层稳定后再接入。"""
     await decay_engine.ensure_started()
 
     # --- Input validation / 输入校验 ---
@@ -8278,6 +8282,7 @@ async def hold(
             name=None,
             bucket_type="feel",
             date=event_date or None,
+            meaning=meaning,
         )
         _queue_embedding_refresh(bucket_id)
         return f"🫧whisper→{bucket_id}"
@@ -8363,6 +8368,7 @@ async def hold(
             bucket_type="permanent",
             pinned=True,
             date=event_date or None,
+            meaning=meaning,
             extra_metadata=_memory_classification_metadata(
                 classification["memory_subject"],
                 classification["memory_layer"],
@@ -8388,6 +8394,7 @@ async def hold(
         memory_layer=classification["memory_layer"],
         memory_classification_source=classification["memory_classification_source"],
         date=event_date,
+        meaning=meaning,
     )
     _queue_memory_enrichment(bucket_id)
 
@@ -8854,6 +8861,8 @@ async def trace(
     digested: int = -1,
     content: str = "",
     date: str = "",
+    meaning_append: str = "",
+    meaning_replace: list | None = None,
     delete: bool = False,
 ) -> str:
     """修改已有记忆，不创建新桶。tags/domain/content 是替换；date 可改事件日期；改前先 read_bucket。resolved/digested 让旧事沉底。只改元数据/date 不重建 embedding，改 content/name 才重建。"""
@@ -8908,6 +8917,10 @@ async def trace(
     event_date = str(date or "").strip()
     if event_date:
         updates["date"] = event_date
+    if meaning_replace is not None:
+        updates["meaning"] = meaning_replace
+    elif meaning_append:
+        updates["meaning_append"] = meaning_append
 
     if not updates:
         return "没有任何字段需要修改。"
