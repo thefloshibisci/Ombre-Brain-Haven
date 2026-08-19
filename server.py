@@ -185,21 +185,22 @@ gateway_state_store = GatewayStateStore(os.path.join(config["buckets_dir"], "gat
 raw_event_store = RawEventStore(config)                  # Raw dialogue archive / 原文保险箱
 reminder_store = ReminderStore(config)                    # Standalone care memos / 独立照顾备忘
 
-# --- Create MCP server instance / 创建 MCP 服务器实例 ---
-# host="0.0.0.0" so Docker container's SSE is externally reachable
-# stdio mode ignores host (no network)
-mcp = FastMCP(
-    "Ombre Brain",
-    host="0.0.0.0",
-    port=8000,
-)
-
-
 def _int_env(name: str, default: int) -> int:
     try:
         return int(os.environ.get(name, str(default)))
     except ValueError:
         return default
+
+
+# --- Create MCP server instance / 创建 MCP 服务器实例 ---
+# Zeabur and similar hosts provide PORT; local and Docker runs keep 8000.
+# OMBRE_PORT remains available as an explicit self-hosted override.
+SERVER_PORT = _int_env("PORT", _int_env("OMBRE_PORT", 8000))
+mcp = FastMCP(
+    "Ombre Brain",
+    host="0.0.0.0",
+    port=SERVER_PORT,
+)
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -13455,7 +13456,7 @@ if __name__ == "__main__":
             async with httpx.AsyncClient() as client:
                 while True:
                     try:
-                        await client.get("http://localhost:8000/health", timeout=5)
+                        await client.get(f"http://localhost:{SERVER_PORT}/health", timeout=5)
                         logger.debug("Keepalive ping OK / 保活 ping 成功")
                     except Exception as e:
                         logger.warning(f"Keepalive ping failed / 保活 ping 失败: {e}")
@@ -13736,6 +13737,6 @@ if __name__ == "__main__":
                 "ChatGPT OAuth enabled for Ombre MCP / 已启用 ChatGPT OAuth: protected_hosts=%s",
                 sorted(OMBRE_CHATGPT_OAUTH_PROTECTED_HOSTS),
             )
-        uvicorn.run(_app, host="0.0.0.0", port=8000)
+        uvicorn.run(_app, host="0.0.0.0", port=SERVER_PORT)
     else:
         mcp.run(transport=transport)
