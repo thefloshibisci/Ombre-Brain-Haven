@@ -3482,6 +3482,14 @@
       <input type="file" id="import-file-input" accept=".json,.txt,.md,.jsonl" style="display:none" />
     </div>
 
+    <details style="margin:12px 0;">
+      <summary style="cursor:pointer;color:var(--accent);">无法选择文件？粘贴 JSON 导入</summary>
+      <textarea id="import-paste-input" placeholder="在这里粘贴 Operit 记忆备份 JSON" style="width:100%;min-height:140px;margin-top:10px;resize:vertical;"></textarea>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+        <button id="import-paste-btn" type="button" onclick="startPastedImport()">导入粘贴内容</button>
+      </div>
+    </details>
+
     <div id="import-detection-status" style="display:none;margin:10px 0;padding:10px 12px;background:var(--surface);border-radius:8px;font-size:13px;"></div>
 
     <div style="margin:12px 0;">
@@ -8906,6 +8914,47 @@ async function inspectOperitBackupFile(file) {
   } catch (e) {}
   status.textContent = '未识别为 Operit 备份，将使用普通对话导入。';
   return null;
+}
+
+async function startPastedImport() {
+  const input = document.getElementById('import-paste-input');
+  const button = document.getElementById('import-paste-btn');
+  const raw = input.value.trim();
+  if (!raw) { alert('请先粘贴 JSON 内容。'); return; }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { alert('JSON 格式不正确: ' + e.message); return; }
+  if (!parsed || Array.isArray(parsed) || !Array.isArray(parsed.memories)) {
+    alert('没有识别到 memories 数组，请粘贴 Operit 记忆备份 JSON。');
+    return;
+  }
+  const status = document.getElementById('import-detection-status');
+  status.style.display = '';
+  status.innerHTML = '✓ 已识别粘贴备份：<strong>' + parsed.memories.length + '</strong> 条；将按 UUID 逐条保留原文。';
+  const operitTagging = document.getElementById('import-operit-tagging').checked;
+  const params = new URLSearchParams({
+    filename: 'pasted-operit-import.json',
+    preserve_raw: '1',
+    resume: '1',
+    import_mode: 'operit',
+    operit_tagging: operitTagging ? '1' : '0',
+  });
+  button.disabled = true;
+  try {
+    const res = await authFetch(BASE + '/api/import/upload?' + params.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: raw,
+    });
+    if (!res) return;
+    const data = await res.json();
+    if (data.error) { alert('导入失败: ' + data.error); return; }
+    input.value = '';
+    document.getElementById('import-progress').style.display = '';
+    document.getElementById('import-pause-btn').style.display = '';
+    pollImportStatus();
+  } catch (e) { alert('导入失败: ' + e.message); }
+  finally { button.disabled = false; }
 }
 
 async function startImport(file) {

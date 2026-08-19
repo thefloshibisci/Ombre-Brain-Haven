@@ -1119,6 +1119,9 @@ class ImportEngine:
             raise ValueError("content must be non-empty text")
 
         operit_uuid = str(entry.get("uuid") or "").strip()
+        ombre_metadata = entry.get("ombreMetadata")
+        if not isinstance(ombre_metadata, dict):
+            ombre_metadata = {}
         bucket_id = self._operit_bucket_id(entry, entry_index)
         existing = await self.bucket_mgr.get(bucket_id)
         if existing:
@@ -1131,10 +1134,23 @@ class ImportEngine:
 
         title = str(entry.get("title") or "").strip()
         tags = self._operit_tags(entry.get("tagNames"))
-        created = self._operit_epoch_iso(entry.get("createdAt"))
-        updated = self._operit_epoch_iso(entry.get("updatedAt")) or created
-        importance = self._operit_importance(entry.get("importance"))
+        migration_tags = _clean_import_list(ombre_metadata.get("tags"), max_items=24, max_chars=80)
+        tags = _dedupe_list(tags + migration_tags)
+        created = self._operit_timestamp_iso(entry.get("createdAt"))
+        updated = self._operit_timestamp_iso(entry.get("updatedAt")) or created
+        importance = _int_between(
+            ombre_metadata.get("importance"),
+            self._operit_importance(entry.get("importance")),
+            1,
+            10,
+        )
         credibility = self._operit_fraction(entry.get("credibility"))
+        domain = _clean_import_list(
+            ombre_metadata.get("domain"), max_items=12, max_chars=80, default=["Operit"]
+        )
+        migration_state = str(ombre_metadata.get("migration_state") or "").strip()[:80]
+        dont_surface = _bool_value(ombre_metadata.get("dont_surface"), False)
+        resolved = _bool_value(ombre_metadata.get("resolved"), False) or dont_surface
         source_ref = {
             "type": "operit_memory",
             "item_id": operit_uuid or bucket_id,
@@ -1159,6 +1175,17 @@ class ImportEngine:
             "operit_tagging_status": "pending" if tagging_enabled else "skipped",
             "operit_tagging_attempts": 0,
         }
+        if ombre_metadata:
+            extra_metadata.update({
+                "migration_state": migration_state,
+                "dont_surface": dont_surface,
+                "source_ids": _clean_import_list(
+                    ombre_metadata.get("source_ids"), max_items=64, max_chars=128
+                ),
+                "source_review_status": str(
+                    ombre_metadata.get("source_review_status") or ""
+                ).strip()[:80],
+            })
         extra_metadata = {key: value for key, value in extra_metadata.items() if value not in (None, "")}
 
         await self.bucket_mgr.create(
@@ -1166,14 +1193,15 @@ class ImportEngine:
             content=content,
             name=title or None,
             tags=tags,
-            domain=["Operit"],
+            domain=domain,
             importance=importance,
             confidence=credibility,
-            source="operit",
+            source=str(ombre_metadata.get("source") or "operit").strip()[:160] or "operit",
             date=_import_event_date(created or updated) or None,
             created=created,
             last_active=updated,
             updated_at=updated,
+            resolved=resolved,
             extra_metadata=extra_metadata,
         )
         return "created"
@@ -1405,6 +1433,11 @@ class ImportEngine:
 
     @staticmethod
     def _operit_bucket_id(entry: dict, entry_index: int) -> str:
+        ombre_metadata = entry.get("ombreMetadata")
+        if isinstance(ombre_metadata, dict):
+            requested_bucket_id = str(ombre_metadata.get("id") or "").strip()
+            if requested_bucket_id and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", requested_bucket_id):
+                return requested_bucket_id
         raw_uuid = str(entry.get("uuid") or "").strip().lower()
         compact_uuid = re.sub(r"[^0-9a-f]", "", raw_uuid)
         if len(compact_uuid) == 32:
@@ -1455,6 +1488,15 @@ class ImportEngine:
             return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=LOCAL_TZ).isoformat(timespec="seconds")
         except (TypeError, ValueError, OSError, OverflowError):
             return None
+
+    @classmethod
+    def _operit_timestamp_iso(cls, value) -> str | None:
+        """Accept native Operit epoch milliseconds or an Ombre migration ISO timestamp."""
+        epoch_value = cls._operit_epoch_iso(value)
+        if epoch_value:
+            return epoch_value
+        parsed = _import_timestamp_datetime(value)
+        return parsed.isoformat(timespec="seconds") if parsed else None
 
     async def _process_chunks(self, preserve_raw: bool) -> dict:
         """Process chunks from current position."""
