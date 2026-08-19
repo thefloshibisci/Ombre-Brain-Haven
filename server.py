@@ -117,6 +117,7 @@ from memory_layers import (
 from memory_metadata import domain_options, normalize_domain_key, normalize_memory_metadata
 from recall_policy import RecallPolicy, diffusion_seed_topic_term_has_specific_residue
 from memory_write_gate import MemoryWriteGate, WriteGateDecision
+from media_store import MediaPersistenceError
 from memory_nodes import MemoryNodeStore
 from persona_engine import PersonaStateEngine
 from persona_event_selection import select_persona_events
@@ -2366,6 +2367,8 @@ def _bucket_read_payload(bucket: dict) -> dict:
         "activation_count",
         "comment_count",
         "comments",
+        "meaning",
+        "media",
         "profile_kind",
         "subject",
         "predicate",
@@ -4026,6 +4029,7 @@ async def _merge_or_create(
     memory_classification_source: str = "",
     date: str = "",
     meaning: str = "",
+    media=None,
 ) -> tuple[str, str, bool, dict | None]:
     """
     Check if a similar bucket exists for merging; merge if so, create if not.
@@ -4073,6 +4077,7 @@ async def _merge_or_create(
                     valence=merged_valence,
                     arousal=merged_arousal,
                     meaning_append=meaning,
+                    media_append=media,
                 )
                 _queue_embedding_refresh(bucket["id"])
                 return bucket["id"], bucket["metadata"].get("name", bucket["id"]), True, related_bucket
@@ -4089,6 +4094,7 @@ async def _merge_or_create(
         name=name or None,
         date=date or None,
         meaning=meaning,
+        media=media,
         extra_metadata=_memory_classification_metadata(
             memory_subject,
             memory_layer,
@@ -8249,8 +8255,9 @@ async def hold(
     date: str = "",
     domain: str = "",
     meaning: str = "",
+    media: list | dict | str | None = None,
 ) -> str:
-    """写一条长期记忆。单个事实/承诺/偏好用 hold；旧记忆的新感受用 comment_bucket；悄悄话用 whisper=True。date 可传事件日期；title 可选，传了就用给定标题，不传则自动生成。普通记忆不用填写 domain，系统会自动判断；维护自我锚点等特殊桶时可显式传 domain。显式 valence/arousal 会覆盖自动情绪。普通记忆 content 的最小写入就是正文；只有确实需要结构化时才按需使用 ### moment、### original、### reflection；reflection 必须写成“我……”第一人称。不要写 ### affect_anchor、### followup 或 ### todo：长期回应变化写进 reflection，到时提醒用 reminder_create。feel=True/whisper=True 时 content 只能写第一人称正文，不写标题或任何 Markdown 分段。meaning 是可选的第一人称“为什么值得被想起”，只存元数据，不参与普通正文召回。media 等新版字段将在适配层稳定后再接入。"""
+    """写一条长期记忆。单个事实/承诺/偏好用 hold；旧记忆的新感受用 comment_bucket；悄悄话用 whisper=True。date 可传事件日期；title 可选，传了就用给定标题，不传则自动生成。普通记忆不用填写 domain，系统会自动判断；维护自我锚点等特殊桶时可显式传 domain。显式 valence/arousal 会覆盖自动情绪。普通记忆 content 的最小写入就是正文；只有确实需要结构化时才按需使用 ### moment、### original、### reflection；reflection 必须写成“我……”第一人称。不要写 ### affect_anchor、### followup 或 ### todo：长期回应变化写进 reflection，到时提醒用 reminder_create。feel=True/whisper=True 时 content 只能写第一人称正文，不写标题或任何 Markdown 分段。meaning 是可选的第一人称“为什么值得被想起”，只存元数据，不参与普通正文召回。media 可传公开图片 URL、服务器路径、含 url/path/data_base64/filename/title/note 的对象，或这些对象的列表；OB 会下载并永久保存，优先传 URL 以免长 Base64 占用上下文。"""
     await decay_engine.ensure_started()
 
     # --- Input validation / 输入校验 ---
@@ -8272,18 +8279,22 @@ async def hold(
         whisper_valence = requested_valence if requested_valence is not None else 0.5
         whisper_arousal = requested_arousal if requested_arousal is not None else 0.3
         whisper_tags = list(dict.fromkeys(extra_tags + ["whisper"]))
-        bucket_id = await bucket_mgr.create(
-            content=content,
-            tags=whisper_tags,
-            importance=5,
-            domain=requested_domain,
-            valence=whisper_valence,
-            arousal=whisper_arousal,
-            name=None,
-            bucket_type="feel",
-            date=event_date or None,
-            meaning=meaning,
-        )
+        try:
+            bucket_id = await bucket_mgr.create(
+                content=content,
+                tags=whisper_tags,
+                importance=5,
+                domain=requested_domain,
+                valence=whisper_valence,
+                arousal=whisper_arousal,
+                name=None,
+                bucket_type="feel",
+                date=event_date or None,
+                meaning=meaning,
+                media=media,
+            )
+        except MediaPersistenceError as exc:
+            return f"媒体保存失败：{exc}"
         _queue_embedding_refresh(bucket_id)
         return f"🫧whisper→{bucket_id}"
 
@@ -8317,6 +8328,11 @@ async def hold(
             )
             if not entry:
                 return "年轮写入失败。"
+            if media or meaning:
+                try:
+                    await bucket_mgr.update(source_id, media_append=media, meaning_append=meaning)
+                except MediaPersistenceError as exc:
+                    return f"年轮已写入，但媒体保存失败：{exc}"
             _queue_embedding_refresh(source_id)
             return f"年轮→{source_id}#{entry['id']}"
 
@@ -8357,45 +8373,53 @@ async def hold(
     # --- 钉选桶跳过合并，直接新建到 permanent 目录 ---
     if pinned:
         related_bucket = await _find_readonly_related_bucket(content)
-        bucket_id = await bucket_mgr.create(
-            content=content,
-            tags=all_tags,
-            importance=10,
-            domain=domain,
-            valence=valence,
-            arousal=arousal,
-            name=suggested_name or None,
-            bucket_type="permanent",
-            pinned=True,
-            date=event_date or None,
-            meaning=meaning,
-            extra_metadata=_memory_classification_metadata(
-                classification["memory_subject"],
-                classification["memory_layer"],
-                classification["memory_classification_source"],
-            ),
-        )
+        try:
+            bucket_id = await bucket_mgr.create(
+                content=content,
+                tags=all_tags,
+                importance=10,
+                domain=domain,
+                valence=valence,
+                arousal=arousal,
+                name=suggested_name or None,
+                bucket_type="permanent",
+                pinned=True,
+                date=event_date or None,
+                meaning=meaning,
+                media=media,
+                extra_metadata=_memory_classification_metadata(
+                    classification["memory_subject"],
+                    classification["memory_layer"],
+                    classification["memory_classification_source"],
+                ),
+            )
+        except MediaPersistenceError as exc:
+            return f"媒体保存失败：{exc}"
         _queue_embedding_refresh(bucket_id)
         _queue_memory_enrichment(bucket_id)
         related_note = _format_readonly_related_memory(related_bucket) if related_bucket else ""
         return f"📌钉选→{bucket_id} {','.join(domain)}{related_note}"
 
     # --- Step 2: merge or create / 合并或新建 ---
-    bucket_id, result_name, is_merged, related_bucket = await _merge_or_create(
-        content=content,
-        tags=all_tags,
-        importance=importance,
-        domain=domain,
-        valence=valence,
-        arousal=arousal,
-        name=suggested_name,
-        allow_merge=False,
-        memory_subject=classification["memory_subject"],
-        memory_layer=classification["memory_layer"],
-        memory_classification_source=classification["memory_classification_source"],
-        date=event_date,
-        meaning=meaning,
-    )
+    try:
+        bucket_id, result_name, is_merged, related_bucket = await _merge_or_create(
+            content=content,
+            tags=all_tags,
+            importance=importance,
+            domain=domain,
+            valence=valence,
+            arousal=arousal,
+            name=suggested_name,
+            allow_merge=False,
+            memory_subject=classification["memory_subject"],
+            memory_layer=classification["memory_layer"],
+            memory_classification_source=classification["memory_classification_source"],
+            date=event_date,
+            meaning=meaning,
+            media=media,
+        )
+    except MediaPersistenceError as exc:
+        return f"媒体保存失败：{exc}"
     _queue_memory_enrichment(bucket_id)
 
     action = "合并→" if is_merged else "新建→"
@@ -8863,6 +8887,8 @@ async def trace(
     date: str = "",
     meaning_append: str = "",
     meaning_replace: list | None = None,
+    media_append: list | dict | str | None = None,
+    media_replace: list | dict | str | None = None,
     delete: bool = False,
 ) -> str:
     """修改已有记忆，不创建新桶。tags/domain/content 是替换；date 可改事件日期；改前先 read_bucket。resolved/digested 让旧事沉底。只改元数据/date 不重建 embedding，改 content/name 才重建。"""
@@ -8921,6 +8947,10 @@ async def trace(
         updates["meaning"] = meaning_replace
     elif meaning_append:
         updates["meaning_append"] = meaning_append
+    if media_replace is not None:
+        updates["media"] = media_replace
+    elif media_append:
+        updates["media_append"] = media_append
 
     if not updates:
         return "没有任何字段需要修改。"
@@ -8931,7 +8961,10 @@ async def trace(
         return _favorite_reason_error()
 
     before_bucket = bucket
-    success = await bucket_mgr.update(bucket_id, **updates)
+    try:
+        success = await bucket_mgr.update(bucket_id, **updates)
+    except MediaPersistenceError as exc:
+        return f"媒体保存失败：{exc}"
     if not success:
         return f"修改失败: {bucket_id}"
 
@@ -10717,6 +10750,48 @@ async def api_bucket_detail(request):
     if not bucket:
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse(_bucket_read_payload(bucket))
+
+
+@mcp.custom_route("/api/bucket/{bucket_id}/media/{media_index}", methods=["GET"])
+async def api_bucket_media(request):
+    """Serve one persisted bucket media item to an authenticated dashboard."""
+    from starlette.responses import FileResponse, JSONResponse
+
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+
+    bucket_id = _coerce_memory_id(request.path_params.get("bucket_id"))
+    if not bucket_id or not MEMORY_ID_RE.fullmatch(bucket_id):
+        return JSONResponse({"error": "invalid bucket_id"}, status_code=400)
+    try:
+        media_index = int(request.path_params.get("media_index", ""))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "invalid media_index"}, status_code=400)
+
+    bucket = await bucket_mgr.get(bucket_id)
+    if not bucket:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    media = bucket.get("metadata", {}).get("media") or []
+    if not isinstance(media, list) or media_index < 0 or media_index >= len(media):
+        return JSONResponse({"error": "media not found"}, status_code=404)
+    reference = media[media_index]
+    if not isinstance(reference, dict):
+        return JSONResponse({"error": "media not found"}, status_code=404)
+    path = bucket_mgr.media_store.resolve(bucket_id, reference)
+    if path is None:
+        return JSONResponse({"error": "media not found"}, status_code=404)
+
+    media_type = str(reference.get("type") or "application/octet-stream").split(";", 1)[0][:128]
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "Content-Security-Policy": "sandbox",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @mcp.custom_route("/api/moments", methods=["GET"])

@@ -42,6 +42,7 @@ import jieba
 from identity import identity_names
 from memory_relevance import content_terms_for_query, memory_relevance_options_from_config, recall_topic_query
 from query_terms import GENERIC_LEXICAL_STOPWORDS
+from media_store import MediaStore
 from utils import (
     bucket_content_for_recall,
     generate_bucket_id,
@@ -79,6 +80,11 @@ class BucketManager:
         self.archive_dir = os.path.join(self.base_dir, "archive")
         self.feel_dir = os.path.join(self.base_dir, "feel")
         self.tombstone_dir = os.path.join(self.base_dir, ".tombstones")
+        self.media_store = MediaStore(
+            self.base_dir,
+            config.get("media_dir") or os.path.join(self.base_dir, "_media"),
+            max_bytes=int(config.get("media_max_bytes") or 25 * 1024 * 1024),
+        )
         self.fuzzy_threshold = config.get("matching", {}).get("fuzzy_threshold", 50)
         self.max_results = config.get("matching", {}).get("max_results", 5)
 
@@ -145,6 +151,7 @@ class BucketManager:
         period: str | None = None,
         date: str | None = None,
         meaning: str | None = None,
+        media=None,
         extra_metadata: dict | None = None,
     ) -> str:
         """
@@ -212,10 +219,6 @@ class BucketManager:
                     continue
                 metadata[str(key)] = value
 
-        # --- Assemble Markdown file (frontmatter + body) ---
-        # --- 组装 Markdown 文件 ---
-        post = frontmatter.Post(linked_content, **metadata)
-
         # --- Choose directory by type + primary domain ---
         # --- 按类型 + 主题域选择存储目录 ---
         if bucket_type == "permanent" or pinned:
@@ -233,6 +236,10 @@ class BucketManager:
         target_dir = os.path.join(type_dir, primary_domain)
         os.makedirs(target_dir, exist_ok=True)
 
+        persisted_media = await self.media_store.persist(bucket_id, media)
+        if persisted_media:
+            metadata["media"] = persisted_media
+
         # --- Filename: readable_name_bucketID.md (Obsidian friendly) ---
         # --- 文件名：可读名称_桶ID.md ---
         if bucket_name and bucket_name != bucket_id:
@@ -242,9 +249,12 @@ class BucketManager:
         file_path = safe_path(target_dir, filename)
 
         try:
+            post = frontmatter.Post(linked_content, **metadata)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(frontmatter.dumps(post))
-        except OSError as e:
+        except Exception as e:
+            if persisted_media:
+                self.media_store.cleanup(bucket_id, [])
             logger.error(f"Failed to write bucket file / 写入桶文件失败: {file_path}: {e}")
             raise
 
@@ -310,6 +320,8 @@ class BucketManager:
             logger.warning(f"Failed to load bucket for update / 加载桶失败: {file_path}: {e}")
             return False
 
+        original_media = post.get("media") or []
+
         # --- Pinned/protected buckets: lock importance to 10, ignore importance changes ---
         # --- 钉选/保护桶：importance 不可修改，强制保持 10 ---
         is_pinned = post.get("pinned", False) or post.get("protected", False)
@@ -364,6 +376,21 @@ class BucketManager:
             if item:
                 current = self._normalize_meaning_list(post.get("meaning") or [])
                 post["meaning"] = self._normalize_meaning_list(current + [item])
+        if "media" in kwargs:
+            persisted = await self.media_store.persist(bucket_id, kwargs.get("media"))
+            if persisted:
+                post["media"] = persisted
+            else:
+                post.metadata.pop("media", None)
+        if "media_append" in kwargs:
+            persisted = await self.media_store.persist(bucket_id, kwargs.get("media_append"))
+            current = post.get("media") or []
+            if not isinstance(current, list):
+                current = []
+            by_digest = {str(item.get("sha256")): item for item in current if isinstance(item, dict)}
+            for item in persisted:
+                by_digest[str(item.get("sha256"))] = item
+            post["media"] = list(by_digest.values())[-20:]
         if "comments" in kwargs:
             post["comments"] = kwargs["comments"] if isinstance(kwargs["comments"], list) else []
         if "comment_count" in kwargs:
@@ -407,9 +434,14 @@ class BucketManager:
         try:
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(frontmatter.dumps(post))
-        except OSError as e:
+        except Exception as e:
+            if "media" in kwargs or "media_append" in kwargs:
+                self.media_store.cleanup(bucket_id, original_media)
             logger.error(f"Failed to write bucket update / 写入桶更新失败: {file_path}: {e}")
             return False
+
+        if "media" in kwargs or "media_append" in kwargs:
+            self.media_store.cleanup(bucket_id, post.get("media") or [])
 
         # --- Auto-move: pinned → permanent/ ---
         # --- 自动移动：钉选 → permanent/ ---
@@ -606,6 +638,7 @@ class BucketManager:
             tombstone = self._build_tombstone(bucket_id, file_path)
             os.remove(file_path)
             self._write_tombstone(tombstone)
+            self.media_store.cleanup(bucket_id, [])
         except OSError as e:
             logger.error(f"Failed to delete bucket file / 删除桶文件失败: {file_path}: {e}")
             return False

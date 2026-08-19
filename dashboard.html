@@ -657,6 +657,73 @@
     overflow-y: auto;
     box-shadow: inset 3px 3px 6px var(--shadow-dark-subtle), inset -3px -3px 6px var(--shadow-light);
   }
+  .detail-meaning,
+  .detail-media {
+    margin-top: 18px;
+  }
+  .detail-meaning h3,
+  .detail-media h3 {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  .meaning-item {
+    margin: 0 0 8px;
+    padding: 11px 14px;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+  .media-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .media-item {
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    text-decoration: none;
+  }
+  .media-item img {
+    display: block;
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+    background: var(--surface-solid);
+  }
+  .media-caption {
+    display: block;
+    padding: 8px 10px 9px;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .media-caption strong,
+  .media-caption span {
+    display: block;
+  }
+  .media-caption span {
+    color: var(--text-light);
+    margin-top: 2px;
+  }
+  .media-unavailable {
+    display: flex;
+    min-height: 150px;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    color: var(--text-light);
+    font-size: 12px;
+    text-align: center;
+  }
   .detail-title-row {
     display: flex;
     align-items: flex-start;
@@ -6404,6 +6471,28 @@ async function showDetail(id) {
     var b = await res.json();
     var meta = b.metadata || {};
     var view = b.metadata_view || {};
+    var meanings = Array.isArray(meta.meaning) ? meta.meaning.filter(function(item) { return String(item || '').trim(); }) : [];
+    var media = Array.isArray(meta.media) ? meta.media.filter(function(item) { return item && typeof item === 'object'; }) : [];
+    var meaningHtml = meanings.length
+      ? '<div class="detail-meaning"><h3>想起它的缘由</h3>' + meanings.map(function(item) {
+          return '<div class="meaning-item">' + esc(String(item)) + '</div>';
+        }).join('') + '</div>'
+      : '';
+    var mediaHtml = media.length
+      ? '<div class="detail-media"><h3>Miss · 留下的画面</h3><div class="media-grid">' + media.map(function(item, index) {
+          var mediaUrl = BASE + '/api/bucket/' + encodeURIComponent(id) + '/media/' + index;
+          var title = String(item.title || ('画面 ' + (index + 1)));
+          var note = String(item.note || '');
+          return '<a class="media-item" href="' + escAttr(mediaUrl) + '" target="_blank" rel="noopener" title="查看原图">' +
+            '<img src="' + escAttr(mediaUrl) + '" alt="' + escAttr(title) + '" loading="lazy" ' +
+              'onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" />' +
+            '<span class="media-unavailable" style="display:none">媒体不可用</span>' +
+            '<span class="media-caption"><strong>' + esc(title) + '</strong>' +
+              (note ? '<span>' + esc(note) + '</span>' : '') +
+            '</span>' +
+          '</a>';
+        }).join('') + '</div></div>'
+      : '';
     var comments = Array.isArray(meta.comments) ? meta.comments : [];
     var commentsHtml = comments.length
       ? '<div class="detail-comments"><h3>年轮</h3>' + comments.map(function(c) {
@@ -6486,6 +6575,8 @@ async function showDetail(id) {
           '</div>' +
         '</form>' +
       '</div>' +
+      meaningHtml +
+      mediaHtml +
       '<div id="bucket-moments-block" class="detail-moments" data-bucket-id="' + escAttr(id) + '">' +
         '<h3>Moments</h3>' +
         '<div class="loading">解析 moments…</div>' +
