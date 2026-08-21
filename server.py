@@ -50,10 +50,12 @@ import hmac
 import json as _json_lib
 import re
 import secrets
+import sqlite3
 import time
 from base64 import b64decode
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 import httpx
@@ -3199,6 +3201,165 @@ async def health_check(request):
         })
     except Exception as e:
         return JSONResponse({"status": "error", "detail": str(e)}, status_code=500)
+
+
+def _read_embedding_storage_diagnostics(
+    db_path: str,
+    bucket_ids: set[str],
+    current_model: str = "",
+) -> dict:
+    """Read-only inspection of the derived embedding index.
+
+    This deliberately does not call the embedding provider or repair the index.
+    A deployment can therefore distinguish an empty/missing volume from a
+    populated vault whose derived index merely needs rebuilding.
+    """
+    path = Path(str(db_path or "")).expanduser().resolve()
+    current_model = str(current_model or "").strip()
+    result = {
+        "path": str(path),
+        "exists": path.is_file(),
+        "quick_check": "missing",
+        "row_count": 0,
+        "bucket_rows": 0,
+        "compatible_current_rows": 0,
+        "missing_bucket_rows": len(bucket_ids),
+        "orphan_rows": 0,
+        "invalid_vector_rows": 0,
+        "incompatible_model_rows": 0,
+        "current_model": current_model,
+        "models": {},
+        "dimensions": {},
+        "error": "",
+    }
+    if not path.is_file():
+        return result
+    try:
+        uri = f"{path.as_uri()}?mode=ro"
+        with sqlite3.connect(uri, uri=True) as conn:
+            result["quick_check"] = str(conn.execute("PRAGMA quick_check").fetchone()[0])
+            rows = conn.execute(
+                "SELECT bucket_id, embedding, model, dimension FROM embeddings"
+            ).fetchall()
+        result["row_count"] = len(rows)
+        models: dict[str, int] = {}
+        dimensions: dict[str, int] = {}
+        indexed_bucket_ids: set[str] = set()
+        for bucket_id, payload, model, dimension in rows:
+            bucket_id = str(bucket_id or "")
+            model_name = str(model or "<missing>")
+            models[model_name] = models.get(model_name, 0) + 1
+            dimension_name = str(dimension or "<missing>")
+            dimensions[dimension_name] = dimensions.get(dimension_name, 0) + 1
+            try:
+                embedding = _json_lib.loads(payload)
+            except (_json_lib.JSONDecodeError, TypeError):
+                embedding = None
+            if bucket_id not in bucket_ids:
+                result["orphan_rows"] += 1
+                continue
+            indexed_bucket_ids.add(bucket_id)
+            result["bucket_rows"] += 1
+            vector_valid = isinstance(embedding, list) and bool(embedding)
+            try:
+                vector_valid = vector_valid and int(dimension) == len(embedding)
+            except (TypeError, ValueError):
+                vector_valid = False
+            if not vector_valid:
+                result["invalid_vector_rows"] += 1
+                continue
+            if current_model and str(model or "") != current_model:
+                result["incompatible_model_rows"] += 1
+                continue
+            result["compatible_current_rows"] += 1
+        result["missing_bucket_rows"] = len(bucket_ids - indexed_bucket_ids)
+        result["models"] = models
+        result["dimensions"] = dimensions
+    except Exception as exc:
+        result["error"] = str(exc)
+        result["quick_check"] = "error"
+    return result
+
+
+async def _storage_diagnostics_payload() -> dict:
+    """Return deployment diagnostics without mutating memory or derived state."""
+    root = Path(str(config.get("buckets_dir") or "")).expanduser().resolve()
+    media_root = Path(str(config.get("media_dir") or root / "_media")).expanduser().resolve()
+    stats = await bucket_mgr.get_stats()
+    buckets = await bucket_mgr.list_all(include_archive=True)
+    bucket_ids = {
+        str(bucket.get("id") or "").strip()
+        for bucket in buckets
+        if str(bucket.get("id") or "").strip()
+    }
+
+    media_total = 0
+    media_readable = 0
+    media_missing = 0
+    media_missing_ids: list[str] = []
+    for bucket in buckets:
+        metadata = bucket.get("metadata") or {}
+        media = metadata.get("media") or []
+        if not isinstance(media, list):
+            continue
+        media_total += len(media)
+        for reference in media:
+            if not isinstance(reference, dict):
+                media_missing += 1
+                continue
+            resolved = bucket_mgr.media_store.resolve(str(bucket.get("id") or ""), reference)
+            if resolved is not None:
+                media_readable += 1
+            else:
+                media_missing += 1
+                if len(media_missing_ids) < 20:
+                    media_missing_ids.append(str(bucket.get("id") or ""))
+
+    embedding = await asyncio.to_thread(
+        _read_embedding_storage_diagnostics,
+        getattr(embedding_engine, "db_path", str(root / "embeddings.db")),
+        bucket_ids,
+        getattr(embedding_engine, "model", ""),
+    )
+    md_files = 0
+    if root.is_dir():
+        md_files = sum(1 for path in root.rglob("*.md") if path.is_file())
+    return {
+        "status": "ok",
+        "storage": {
+            "buckets_dir": str(root),
+            "buckets_dir_exists": root.is_dir(),
+            "buckets_dir_readable": os.access(root, os.R_OK),
+            "buckets_dir_writable": os.access(root, os.W_OK),
+            "markdown_files": md_files,
+            "bucket_records": len(buckets),
+            "stats": stats,
+        },
+        "media": {
+            "media_dir": str(media_root),
+            "media_dir_exists": media_root.is_dir(),
+            "references": media_total,
+            "readable": media_readable,
+            "missing": media_missing,
+            "missing_bucket_ids": media_missing_ids,
+        },
+        "embeddings": embedding,
+    }
+
+
+@mcp.custom_route("/api/storage/diagnostics", methods=["GET"])
+async def api_storage_diagnostics(request):
+    """Authenticated, read-only deployment/storage diagnostics."""
+    from starlette.responses import JSONResponse
+
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        return JSONResponse(await _storage_diagnostics_payload())
+    except Exception as exc:
+        logger.exception("Storage diagnostics failed: %s", exc)
+        return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
 
 
 # =============================================================
