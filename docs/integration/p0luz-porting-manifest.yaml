@@ -1,0 +1,388 @@
+schema_version: 1
+updated_at: "2026-08-26"
+canonical_repository:
+  path: "D:\\silence\\Ombre-Brain"
+  branch: "codex/miss-compat"
+  commit: "ae1c4958e7920c61e0a0ad10afcac8650e663f8d"
+reference_repository:
+  path: "D:\\silence\\P0luz-Ombre-Brain"
+  branch: "main"
+  locked_commit: "7c8817520781fe263b254bcd05910564a60ec61d"
+  locked_version: "2.17.11"
+  common_baseline: "e9d61b5d9de8fb102beacdabf5a5b0f6957162fc"
+policy:
+  unit_of_porting: "behavior_and_contract_test"
+  whole_file_replacement_forbidden:
+    - server.py
+    - bucket_manager.py
+    - deployment_directories
+  preserve_haven_data_shapes: true
+  preserve_legacy_bucket_readability: true
+  production_access_forbidden: true
+  post_baseline_commits_auto_included: false
+
+batches:
+  - id: B1
+    name: errors-and-common-validation
+    disposition: MERGE_BEHAVIOR
+    status: pending
+    sources:
+      - src/errors.py
+      - src/tools/_common.py
+      - src/ombrebrain/kernel/errors.py
+    commits:
+      - e1fb27f
+      - 945d4ff
+    behaviors:
+      - redact credentials, URLs and provider details from public failures
+      - bound public error length
+      - distinguish input errors from provider/LLM failures
+      - preserve Haven public response envelopes where clients depend on them
+    target_areas:
+      - server.py
+      - bucket_manager.py
+      - gateway.py
+      - write_memory.py
+    tests:
+      reference:
+        - tests/test_auth_input_validation.py
+        - tests/test_security_regression.py
+        - tests/test_grow_items.py
+      haven_new:
+        - tests/test_public_error_sanitization.py
+    acceptance:
+      - no credential-like material appears in tool or HTTP errors
+      - invalid input is deterministic and does not claim an API key is healthy or broken
+      - Gateway routes retain their existing status/envelope contracts
+
+  - id: B2
+    name: embedding-outbox
+    disposition: PORT_P0LUZ
+    status: pending
+    sources:
+      - src/ombrebrain/storage/embedding_outbox.py
+      - src/embedding_engine.py
+      - src/server.py
+    commits:
+      - 56d5877
+    behaviors:
+      - durable asynchronous indexing queue
+      - restart recovery and duplicate coalescing
+      - written Markdown succeeds even when embedding fails
+      - bounded retry and observable pending/failed state
+    target_areas:
+      - embedding_engine.py
+      - bucket_manager.py
+      - server.py
+      - state/embedding_outbox.sqlite
+    tests:
+      reference:
+        - tests/test_embedding_outbox.py
+        - tests/test_embedding_api_regression.py
+      haven_new:
+        - tests/test_embedding_outbox.py
+    acceptance:
+      - embedding failure never rolls back a successful Markdown write
+      - restart resumes pending work exactly once
+      - missing active vectors can be enqueued without rewriting bucket text
+
+  - id: B3
+    name: grow-idempotency
+    disposition: PORT_P0LUZ
+    status: pending
+    sources:
+      - src/tools/grow/retry_guard.py
+      - src/tools/grow/core.py
+      - src/server.py
+    commits:
+      - d3ceb7a
+      - f809ea1
+      - 58aa11a
+    behaviors:
+      - reuse an in-flight or completed grow task for the same idempotency identity
+      - client timeout/disconnect does not duplicate memory writes
+      - grow items, test_data and source_ranges survive retries
+    target_areas:
+      - server.py
+      - bucket_manager.py
+      - write_memory.py
+      - state/grow_retry.sqlite
+    tests:
+      reference:
+        - tests/test_grow_retry_guard.py
+        - tests/test_grow_items.py
+      haven_new:
+        - tests/test_grow_idempotency.py
+    acceptance:
+      - identical retry creates no second bucket set
+      - distinct requests are not collapsed solely by similar text
+      - failed pre-write validation is safe to retry
+
+  - id: B4
+    name: reversible-source-bindings
+    disposition: MERGE_BEHAVIOR
+    status: pending
+    sources:
+      - src/ombrebrain/storage/source_store.py
+      - src/tools/source_bindings/core.py
+      - src/tools/source_read/core.py
+    commits:
+      - 3e52912
+      - d9fbc22
+      - 1d6694e
+      - b64bfbd
+      - 08965bf
+    behaviors:
+      - immutable shared source blobs
+      - ordered source_links ledger with stable one-based slots
+      - active source_refs compatibility projection
+      - idempotent detach and restore
+      - explicit source selection before reading multi-source bodies
+      - backup closure includes active and detached references
+    target_areas:
+      - source_refs.py
+      - bucket_manager.py
+      - server.py
+      - import_memory.py
+    tests:
+      reference:
+        - tests/test_source_layer.py
+        - tests/test_backup_archive.py
+      haven_new:
+        - tests/test_source_bindings.py
+    acceptance:
+      - binding operations do not alter bucket body, lifecycle, recency or embedding
+      - archived buckets remain archived
+      - legacy source_refs remain readable
+      - a shared source is not duplicated per bucket
+
+  - id: B5
+    name: relation-id-first-bidirectional
+    disposition: MERGE_BEHAVIOR
+    status: pending
+    sources:
+      - src/ombrebrain/storage/relation_store.py
+      - src/tools/relation_bindings/core.py
+      - src/tools/relation_read/core.py
+    commits:
+      - 69c6c60
+      - 8ea3541
+      - 5e98d58
+      - 9669f02
+      - bb7fdae
+      - 0fbc287
+      - d57f520
+      - 7c88175
+    behaviors:
+      - relation_id-first mirrored ledgers
+      - deterministic reverse semantics for fixed relation types
+      - custom label/reverse_label only for custom type
+      - ordered dual-bucket locking
+      - reversible detach/restore across both mirrors
+      - legacy single-direction relation compatibility
+      - at most two low-cost hints after an already selected bucket
+    target_areas:
+      - memory_edges.py
+      - bucket_manager.py
+      - server.py
+      - import_memory.py
+      - recall rendering only
+    tests:
+      reference:
+        - tests/test_relation_v1.py
+      haven_new:
+        - tests/test_relation_bindings.py
+    acceptance:
+      - Relation never becomes a recall candidate or embedding document
+      - Relation never recursively traverses targets
+      - both mirrors share one relation_id and consistent active state
+      - legacy ledgers remain readable without forced migration
+
+  - id: B6
+    name: metadata-tools-letters-and-boundaries
+    disposition: MERGE_BEHAVIOR
+    status: pending
+    sources:
+      - src/tools
+      - src/ombrebrain/domain
+      - src/server.py
+    commits:
+      - 0867ae8
+      - 499e839
+      - ad73eb7
+      - 231c8bc
+      - e1a99ab
+      - 1db60df
+      - 89bcd16
+      - f3af09e
+      - 0bfc768
+      - ee39748
+      - 60b16cc
+      - 1815fb0
+    behaviors:
+      - legacy metadata normalization without mandatory rewrite
+      - explicit plan resolution
+      - letter lock boundaries and stable return shapes
+      - grow test_data and optional domain
+      - I witness accounting
+      - pinned/anchor/catalog token-budget behavior
+      - developer test_data erasure only
+    target_areas:
+      - bucket_manager.py
+      - server.py
+      - dream_engine.py
+      - memory_metadata.py
+    tests:
+      reference:
+        - tests/test_breath_catalog.py
+        - tests/test_developer_test_data_erasure.py
+        - tests/test_grow_items.py
+        - tests/test_i_sediment.py
+        - tests/test_letter_author_regression.py
+        - tests/test_letter_read_regression.py
+        - tests/test_letter_time_lock.py
+      haven_new:
+        - tests/test_legacy_metadata_contract.py
+        - tests/test_letter_contract.py
+    acceptance:
+      - existing Haven feel, plan, letter, archive and bucket files stay readable
+      - no general-purpose hard deletion is introduced
+      - pinned or locked content is not leaked by alternate memory surfaces
+
+  - id: B7
+    name: import-backup-and-id-remap
+    disposition: MERGE_BEHAVIOR
+    status: pending
+    sources:
+      - src/migration_engine.py
+      - src/ombrebrain/storage/backup_archive.py
+      - src/web/import_api.py
+    commits:
+      - 467ac02
+    behaviors:
+      - recognize Claude conversations export
+      - atomic staged import and rollback
+      - keep-both ID rewriting for internal references
+      - source and relation closure preservation
+      - fail closed when referenced targets were not imported
+    target_areas:
+      - import_memory.py
+      - server.py
+      - source_refs.py
+    tests:
+      reference:
+        - tests/test_backup_archive.py
+        - tests/test_backup_import_safety.py
+        - tests/test_import_extraction_json.py
+        - tests/test_migration_engine_atomic_swap.py
+      haven_new:
+        - tests/test_import_keep_both_references.py
+    acceptance:
+      - failed import leaves the pre-import store unchanged
+      - keep-both cannot point at an unrelated local bucket with the old ID
+      - Haven migration metadata and safe pasted bridge remain intact
+
+  - id: B8
+    name: mcp-schema-dashboard-compatibility
+    disposition: MERGE_BEHAVIOR
+    status: pending
+    sources:
+      - src/protocol
+      - src/server.py
+      - src/web/dashboard.py
+    commits:
+      - d57f520
+      - c7a0883
+    behaviors:
+      - expose fixed relation types as schema enum
+      - publish ID-first, direction, stable-slot and legacy semantics
+      - preserve Haven tool names and response shapes
+      - keep Dashboard operations compatible with protected Haven routes
+    target_areas:
+      - server.py
+      - dashboard.html
+      - dashboard_assets
+    tests:
+      reference:
+        - tests/test_mcp_tools_docker_integration.py
+        - tests/test_dashboard_memory_editor_contract.py
+      haven_new:
+        - tests/test_mcp_schema_contract.py
+    acceptance:
+      - tools/list remains backward compatible
+      - Haven Gateway, raw-event, Persona and diagnostics tools remain present
+      - schema changes are additive for existing clients
+
+post_baseline_candidates:
+  disposition: OUT_OF_SCOPE
+  reason: "The approved scope is locked to 2.17.11. These commits require a separate matrix because several intentionally break public tool and retrieval contracts."
+  range: "7c88175..8203539"
+  count: 67
+  commits:
+    - "10d8722 3.0.0 public tool reduction and feel keyword retrieval"
+    - "d46e34c quote capture at write time"
+    - "176deb7 3.1.0 release"
+    - "033a894 quotes MCP tests"
+    - "fc95865 3.2.0 letter route and automatic relation changes"
+    - "198b814 core/anchor digestion guard"
+    - "c78d137 semantic threshold change"
+    - "6da3f05 retrieval design-debt note"
+    - "4249ef8 dashboard letter route test"
+    - "09d075f MCP extra default test"
+    - "6f7335d dual connector docs/tests"
+    - "081d939 relation correction 3.3.0"
+    - "10e8729 optional You projection"
+    - "b7ab3ad Docker/Dashboard acceptance"
+    - "09d5bbe merge testing 3.3.0"
+    - "b3d8ffe retire MCP extra again"
+    - "cf7d5f4 quote mutation 3.4.0"
+    - "dc8db69 case-insensitive overwrite import fix"
+    - "26b3187 You merge 3.4.1"
+    - "9d980ca You evidence grouping fix"
+    - "9cc1fdf remove stale connector docs"
+    - "591d344 simplify You authoring"
+    - "59bedf1 You specification"
+    - "0d0d8cd attribution rendering"
+    - "c228644 Them projection"
+    - "35214f8 attribution rendering-only tests"
+    - "47cf0c9 Them quota/config fix"
+    - "86815a7 You/Them evidence invalidation"
+    - "ccf8b69 Them backup gap documentation"
+    - "fdac439 Them validation and archive behavior"
+    - "5cf556b Them correction/backup integration"
+    - "d8ba4c4 reverse mistaken archive invalidation"
+    - "cc46bc9 3.5.0 release"
+    - "be4085d Them usability fixes"
+    - "ec8e486 unified knowledge UI"
+    - "dedd636 roster/known_via rendering"
+    - "b30fcc5 README/INTERNALS sync"
+    - "991a306 specification/tool-gate sync"
+    - "4f13a1e same-name gate fix"
+    - "e625cd2 remove bucket observer"
+    - "856046d backup source/You/Them closure"
+    - "a079c21 repeated Them claim quota fix"
+    - "d0bdb44 import rollback restore"
+    - "ef8cca4 relation-description gate fix"
+    - "5c5fc6f human relation definition boundaries"
+    - "e9ab3ac relation-definition policy docs"
+    - "686fb06 letter lock docs"
+    - "3bf62d person_id identity gate fix"
+    - "ed1e845 ADR completion"
+    - "4718c48 ruff fixes"
+    - "a621c3d SQL security fix"
+    - "948cab6 grow automatic quote evidence"
+    - "96a800e source_ranges parser fix"
+    - "0a764f2 ToolInputError"
+    - "0c4d5d1 hold/trace failure exceptions"
+    - "f9ae918 remaining tool failure exceptions"
+    - "dc5bde2 media temp-path and count guard"
+    - "9bfe5bf false-success and not-found fixes"
+    - "600717d You lock atomicity"
+    - "cf8fcd6 trace empty-call noop restoration"
+    - "74bf107 I length error semantics"
+    - "cc24d4c breath 3.6.0 retrieval changes"
+    - "f30e5e7 test style only"
+    - "58b4440 footprint refactor and stress test"
+    - "c864d64 tzdata dependency"
+    - "9984d51 You error/schema clarity"
+    - "8203539 Them/You claim and known_via fixes"

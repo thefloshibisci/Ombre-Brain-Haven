@@ -25,6 +25,7 @@ from starlette.routing import Route
 from bucket_manager import BucketManager
 from dehydrator import Dehydrator
 from dream_engine import DreamEngine
+from errors import safe_error_detail
 from embedding_engine import EmbeddingEngine
 from favorite_tags import has_favorite_memory_tag, is_flavor_tag
 from identity import identity_names
@@ -1822,8 +1823,11 @@ class GatewayService:
         try:
             return JSONResponse(await self.health_payload())
         except Exception as exc:
-            logger.exception("Gateway health check failed: %s", exc)
-            return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
+            logger.error("Gateway health check failed: %s", safe_error_detail(exc))
+            return JSONResponse(
+                {"status": "error", "detail": safe_error_detail(exc)},
+                status_code=500,
+            )
 
     async def handle_chat(self, request: Request) -> Response:
         auth_result = self._authorize(request.headers.get("Authorization", ""))
