@@ -159,7 +159,7 @@ batches:
   - id: B5
     name: relation-id-first-bidirectional
     disposition: MERGE_BEHAVIOR
-    status: pending
+    status: done
     sources:
       - src/ombrebrain/storage/relation_store.py
       - src/tools/relation_bindings/core.py

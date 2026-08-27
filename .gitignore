@@ -4,6 +4,7 @@ tests/*
 !tests/test_embedding_outbox.py
 !tests/test_grow_idempotency.py
 !tests/test_source_layer.py
+!tests/test_relation_bindings.py
 *.pyc
 *.pyo
 .env

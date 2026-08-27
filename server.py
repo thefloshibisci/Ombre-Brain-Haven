@@ -138,6 +138,8 @@ from source_bindings import attach as _source_bindings_attach, detach as _source
 from source_refs import source_ref_window
 from source_read import dispatch as _source_read_dispatch
 from source_store import SourceStore
+from relation_bindings import attach as _relation_bindings_attach, detach as _relation_bindings_detach, restore as _relation_bindings_restore
+from relation_read import dispatch as _relation_read_dispatch
 from word_map import WordMapStore, reflection_identity_terms
 from utils import (
     bucket_content_for_recall,
@@ -8995,6 +8997,31 @@ async def source_detach(bucket_id: str, expected_title: str, source_slot: int) -
 async def source_restore(bucket_id: str, expected_title: str, source_slot: int) -> str:
     """恢复一个 detached Source slot 的原绑定；只恢复证据引用，不恢复 archived 桶。桶生命周期恢复请用 trace(..., restore=True)。"""
     return await _source_bindings_restore(bucket_mgr, bucket_id, expected_title, source_slot)
+
+
+# =============================================================
+# Tool 3.4b: relation ledger — reversible bidirectional memory links
+# 工具 3.4b：关系台账 — 可逆双向记忆关联
+# =============================================================
+@mcp.tool()
+async def relation_read(bucket_id: str, expected_title: str = "", include_titles: bool = False, include_detached: bool = False) -> str:
+    """显式读取一个记忆桶的关系台账。默认只显示 active relation；include_detached=true 才显示历史关系，include_titles=true 才按需读取目标标题（绝不读目标正文）。"""
+    return await _relation_read_dispatch(bucket_mgr, bucket_id, expected_title, include_titles, include_detached)
+
+@mcp.tool()
+async def relation_attach(bucket_id: str, target_bucket_id: str, relation_type: str, expected_title: str = "", label: str = "", reverse_label: str = "") -> str:
+    """给两个普通记忆桶建立一条可逆双向关系；固定六型自动反向，custom 类型必须给 label。不改变桶正文、活跃度或生命周期。"""
+    return await _relation_bindings_attach(bucket_mgr, bucket_id, target_bucket_id, relation_type, expected_title, label, reverse_label)
+
+@mcp.tool()
+async def relation_detach(bucket_id: str, relation_slot: int, expected_title: str = "") -> str:
+    """断开一个稳定 relation slot；双向镜像同步停用，但保留历史记录。"""
+    return await _relation_bindings_detach(bucket_mgr, bucket_id, relation_slot, expected_title)
+
+@mcp.tool()
+async def relation_restore(bucket_id: str, relation_slot: int, expected_title: str = "") -> str:
+    """恢复一个 detached relation slot 的双向镜像。"""
+    return await _relation_bindings_restore(bucket_mgr, bucket_id, relation_slot, expected_title)
 
 
 # =============================================================

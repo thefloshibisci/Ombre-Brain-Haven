@@ -318,6 +318,144 @@ class BucketManager:
                 atomic_write_text(file_path, frontmatter.dumps(post))
             return result
 
+    async def mutate_relation_pair(self, left_id: str, right_id: str, mutation) -> Any:
+        """Atomically change mirrored relation links on both buckets.
+
+        Locks are acquired in sorted-bucket-id order to prevent deadlocks.
+        The callback receives ``(left_post, right_post)`` and returns
+        ``(left_changed, right_changed, result)``.  If the second write is
+        rejected, the first write is rolled back so a failed relation
+        operation never leaves a half-mirrored ledger behind.
+        """
+        left_id = str(left_id or "").strip()
+        right_id = str(right_id or "").strip()
+        if not left_id or not right_id:
+            return None
+        ids = sorted({left_id, right_id})
+        first = self._derived_index_locks.get(ids[0])
+        if first is None:
+            first = asyncio.Lock()
+            self._derived_index_locks[ids[0]] = first
+        async with first:
+            if len(ids) == 1:
+                second = None
+            else:
+                second = self._derived_index_locks.get(ids[1])
+                if second is None:
+                    second = asyncio.Lock()
+                    self._derived_index_locks[ids[1]] = second
+                await second.acquire()
+            left_file = self._find_bucket_file(left_id)
+            right_file = self._find_bucket_file(right_id)
+            if not left_file or not right_file:
+                if second is not None and second.locked():
+                    second.release()
+                return None
+            try:
+                left_post = frontmatter.load(left_file)
+                right_post = frontmatter.load(right_file)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load buckets for relation binding / 加载桶关系绑定失败: "
+                    "%s: %s",
+                    (left_file, right_file),
+                    exc,
+                )
+                if second is not None and second.locked():
+                    second.release()
+                return None
+
+            # Snapshot the serialized pre-mutation state so a half-written
+            # mirror can be rolled back if the second side rejects the write.
+            try:
+                left_snapshot = frontmatter.dumps(left_post)
+                right_snapshot = frontmatter.dumps(right_post)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to snapshot buckets for relation binding / 快照桶关系绑定失败: "
+                    "%s: %s",
+                    (left_file, right_file),
+                    exc,
+                )
+                if second is not None and second.locked():
+                    second.release()
+                return None
+
+            try:
+                left_changed, right_changed, result = mutation(left_post, right_post)
+            except Exception:
+                if second is not None and second.locked():
+                    second.release()
+                raise
+
+            left_written = False
+            right_written = False
+            try:
+                if left_changed:
+                    atomic_write_text(left_file, frontmatter.dumps(left_post))
+                    left_written = True
+                if right_changed:
+                    atomic_write_text(right_file, frontmatter.dumps(right_post))
+                    right_written = True
+            except Exception:
+                # Best-effort rollback of any completed half-write using the
+                # pre-mutation serialized snapshot.
+                if left_written:
+                    try:
+                        atomic_write_text(left_file, left_snapshot)
+                    except Exception:
+                        logger.exception(
+                            "Failed to roll back relation mirror write / 回滚关系镜像写入失败: %s",
+                            left_file,
+                        )
+                if right_written:
+                    try:
+                        atomic_write_text(right_file, right_snapshot)
+                    except Exception:
+                        logger.exception(
+                            "Failed to roll back relation mirror write / 回滚关系镜像写入失败: %s",
+                            right_file,
+                        )
+                raise
+            finally:
+                if second is not None and second.locked():
+                    second.release()
+            return result
+
+    async def mutate_relation_links(self, bucket_id: str, mutation) -> Any:
+        """Atomically change relation bindings only, including archived buckets.
+
+        The callback receives the loaded frontmatter post and returns
+        ``(changed, result)``.  This deliberately bypasses normal update()
+        lifecycle/recency behaviour and derived indexing while retaining an
+        in-process write turn.
+        """
+        normalized_id = str(bucket_id or "").strip()
+        if not normalized_id:
+            return None
+        lock = self._derived_index_locks.get(normalized_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._derived_index_locks[normalized_id] = lock
+        async with lock:
+            file_path = self._find_bucket_file(normalized_id)
+            if not file_path:
+                return None
+            try:
+                post = frontmatter.load(file_path)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load bucket for relation binding / 加载桶关系绑定失败: "
+                    "%s: %s",
+                    file_path,
+                    exc,
+                )
+                return None
+            changed, result = mutation(post)
+            if changed:
+                atomic_write_text(file_path, frontmatter.dumps(post))
+            return result
+
     # ---------------------------------------------------------
     # Read bucket content
     # 读取桶内容
