@@ -26,6 +26,8 @@
 # ============================================================
 
 import os
+import asyncio
+import hashlib
 import math
 import logging
 import re
@@ -50,6 +52,7 @@ from utils import (
     safe_path,
     sanitize_name,
     strip_wikilinks,
+    parse_bool,
 )
 
 logger = logging.getLogger("ombre_brain.bucket")
@@ -87,6 +90,11 @@ class BucketManager:
         )
         self.fuzzy_threshold = config.get("matching", {}).get("fuzzy_threshold", 50)
         self.max_results = config.get("matching", {}).get("max_results", 5)
+
+        # --- Optional derived-index engine and durable outbox / 可选派生索引引擎 ---
+        self.embedding_engine = None
+        self.embedding_outbox = None
+        self._derived_index_locks: dict[str, asyncio.Lock] = {}
 
         # --- Wikilink config / 双链配置 ---
         wikilink_cfg = config.get("wikilink", {})
@@ -261,6 +269,18 @@ class BucketManager:
         logger.info(
             f"Created bucket / 创建记忆桶: {bucket_id} ({bucket_name}) → {primary_domain}/"
             + (" [PINNED]" if pinned else "") + (" [PROTECTED]" if protected else "")
+        )
+        self._queue_derived_state(
+            bucket_id,
+            content=linked_content,
+            meaning=metadata.get("meaning") or [],
+            queue_content=True,
+            queue_meaning=bool(metadata.get("meaning")),
+        )
+        await self._index_after_update(
+            bucket_id,
+            content_changed=True,
+            meaning_changed=bool(metadata.get("meaning")),
         )
         return bucket_id
 
@@ -462,6 +482,18 @@ class BucketManager:
             self._move_bucket(file_path, target_dir, domain)
 
         logger.info(f"Updated bucket / 更新记忆桶: {bucket_id}")
+        self._queue_derived_state(
+            bucket_id,
+            content=str(post.content or ""),
+            meaning=post.get("meaning") or [],
+            queue_content="content" in kwargs,
+            queue_meaning="meaning" in kwargs or "meaning_append" in kwargs,
+        )
+        await self._index_after_update(
+            bucket_id,
+            content_changed="content" in kwargs,
+            meaning_changed="meaning" in kwargs or "meaning_append" in kwargs,
+        )
         return True
 
     @staticmethod
@@ -484,6 +516,283 @@ class BucketManager:
             if item and item not in result:
                 result.append(item)
         return result[-_MEANING_LIST_MAX_ITEMS:]
+
+    def attach_embedding_outbox(self, outbox) -> None:
+        """Attach the durable derived-index queue after both objects exist."""
+        self.embedding_outbox = outbox
+
+    def attach_embedding_engine(self, engine) -> None:
+        """Attach the embedding engine after both objects exist."""
+        self.embedding_engine = engine
+
+    def _queue_derived_state(
+        self,
+        bucket_id: str,
+        *,
+        content: str = "",
+        meaning=None,
+        queue_content: bool = False,
+        queue_meaning: bool = False,
+    ) -> None:
+        """Persist desired derived state immediately after a Markdown commit."""
+        outbox = self.embedding_outbox
+        if outbox is None:
+            return
+        try:
+            if queue_content:
+                outbox.enqueue(bucket_id, str(content or ""))
+            if queue_meaning:
+                meaning_list = self._normalize_meaning_list(meaning or [])
+                meaning_text = meaning_list[-1] if meaning_list else ""
+                enqueue_meaning = getattr(outbox, "enqueue_meaning", None)
+                if callable(enqueue_meaning):
+                    enqueue_meaning(bucket_id, meaning_text)
+        except Exception as exc:
+            logger.warning(
+                "Derived outbox enqueue failed / 派生 outbox 入队失败: %s: %s",
+                bucket_id,
+                exc,
+            )
+
+    def _derived_index_turn(self, bucket_id: str):
+        """Serialize derived-index writes for one bucket without blocking edits."""
+
+        class _AsyncTurn:
+            def __init__(self, lock: asyncio.Lock):
+                self._lock = lock
+
+            async def __aenter__(self):
+                await self._lock.acquire()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                self._lock.release()
+
+        normalized = str(bucket_id or "").strip()
+        if not normalized:
+            return _AsyncTurn(asyncio.Lock())
+        lock = self._derived_index_locks.get(normalized)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._derived_index_locks[normalized] = lock
+        return _AsyncTurn(lock)
+
+    async def _sync_embedding(self, bucket_id: str, content: str) -> bool:
+        """Best-effort inline indexing for runtimes without a queue worker."""
+        if not self.embedding_engine or not getattr(
+            self.embedding_engine, "enabled", False
+        ):
+            return False
+        if not content or not content.strip():
+            return True
+        return bool(
+            await self.embedding_engine.generate_and_store(bucket_id, content)
+        )
+
+    async def _sync_meaning_embedding(self, bucket_id: str, meaning_list: list[str]) -> None:
+        """Best-effort: embed the latest meaning entry, separate from content."""
+        meaning_text = meaning_list[-1] if meaning_list else ""
+        outbox = self.embedding_outbox
+        if outbox is not None:
+            try:
+                queued = bool(outbox.enqueue_meaning(bucket_id, meaning_text))
+            except Exception as exc:
+                queued = False
+                logger.warning("meaning outbox enqueue failed for %s: %s", bucket_id, exc)
+            if queued and getattr(outbox, "running", False):
+                return
+        engine = self.embedding_engine
+        if not engine or not getattr(engine, "enabled", False):
+            return
+        if not meaning_text:
+            clear_meaning = getattr(engine, "delete_meaning_embedding", None)
+            if callable(clear_meaning):
+                try:
+                    clear_meaning(bucket_id)
+                    if outbox is not None:
+                        complete_meaning = getattr(outbox, "complete_meaning", None)
+                        if callable(complete_meaning):
+                            complete_meaning(bucket_id, meaning_text)
+                except Exception as exc:
+                    logger.warning(f"meaning embedding clear failed for {bucket_id}: {exc}")
+            return
+        store_meaning = getattr(engine, "generate_and_store_meaning", None)
+        if not callable(store_meaning):
+            return
+        try:
+            stored = bool(await store_meaning(bucket_id, meaning_text))
+            if stored and outbox is not None:
+                complete_meaning = getattr(outbox, "complete_meaning", None)
+                if callable(complete_meaning):
+                    complete_meaning(bucket_id, meaning_text)
+            elif not stored:
+                logger.warning("meaning embedding remained queued for %s", bucket_id)
+        except Exception as exc:
+            logger.warning(f"meaning embedding failed for {bucket_id}: {exc}")
+
+    async def _index_after_write(self, bucket_id: str, content: str) -> None:
+        """Queue derived indexing after Markdown is safely on disk."""
+        outbox = self.embedding_outbox
+        engine = self.embedding_engine
+        hash_reader = getattr(engine, "get_content_hash", None)
+        if callable(hash_reader) and content:
+            try:
+                stored_hash = str(hash_reader(bucket_id) or "")
+            except Exception:
+                stored_hash = ""
+            desired_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            if stored_hash and stored_hash == desired_hash:
+                if outbox is not None:
+                    complete_content = getattr(outbox, "complete_content", None)
+                    if callable(complete_content):
+                        complete_content(bucket_id, content)
+                return
+
+        queued = False
+        if outbox is not None:
+            try:
+                queued = bool(outbox.enqueue(bucket_id, content))
+            except Exception as exc:
+                logger.error(
+                    "Failed to persist embedding outbox item for %s: %s",
+                    bucket_id,
+                    exc,
+                )
+            if queued and getattr(outbox, "running", False):
+                return
+
+        try:
+            indexed = await self._sync_embedding(bucket_id, content)
+        except Exception as exc:
+            indexed = False
+            logger.warning(
+                "Inline embedding attempt failed; memory remains queued / "
+                "同步向量尝试失败，记忆已保留待后台重试: %s: %s",
+                bucket_id,
+                exc,
+            )
+        if indexed and outbox is not None:
+            try:
+                complete_content = getattr(outbox, "complete_content", None)
+                if callable(complete_content):
+                    complete_content(bucket_id, content)
+                else:
+                    outbox.discard(bucket_id)
+            except Exception:
+                logger.warning("Failed to acknowledge embedding outbox item: %s", bucket_id)
+        elif not indexed:
+            logger.warning(
+                "Memory saved without vector; pending retry / 记忆已落盘，向量待重试: %s",
+                bucket_id,
+            )
+
+    async def _index_after_update(
+        self,
+        bucket_id: str,
+        *,
+        content_changed: bool = False,
+        meaning_changed: bool = False,
+    ) -> None:
+        """Refresh derived indexes after the Markdown commit."""
+        if not content_changed and not meaning_changed:
+            return
+        outbox = self.embedding_outbox
+        if outbox is not None and getattr(outbox, "running", False):
+            return
+        await self._index_after_update_inner(
+            bucket_id,
+            content_changed=content_changed,
+            meaning_changed=meaning_changed,
+        )
+
+    async def _index_after_update_inner(
+        self,
+        bucket_id: str,
+        *,
+        content_changed: bool,
+        meaning_changed: bool,
+    ) -> None:
+        """Converge derived indexes to the latest Markdown state."""
+        try:
+            async with self._derived_index_turn(bucket_id):
+                for _reconcile_pass in range(3):
+                    bucket = await self.get(bucket_id)
+                    if not bucket:
+                        return
+                    metadata = bucket.get("metadata") or {}
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+                    if (
+                        str(metadata.get("type") or "").strip().lower()
+                        == "archived"
+                        or metadata.get("deleted_at")
+                        or parse_bool(metadata.get("tombstone"), default=False)
+                    ):
+                        return
+
+                    indexed_content = str(bucket.get("content") or "")
+                    indexed_meaning = self._normalize_meaning_list(
+                        metadata.get("meaning") or []
+                    )
+                    if content_changed:
+                        await self._index_after_write(bucket_id, indexed_content)
+                    if meaning_changed:
+                        await self._sync_meaning_embedding(
+                            bucket_id,
+                            indexed_meaning,
+                        )
+
+                    latest = await self.get(bucket_id)
+                    latest_metadata = (latest or {}).get("metadata") or {}
+                    if not isinstance(latest_metadata, dict):
+                        latest_metadata = {}
+                    became_deleted = not latest or (
+                        latest_metadata.get("deleted_at")
+                        or parse_bool(
+                            latest_metadata.get("tombstone"), default=False
+                        )
+                    )
+                    if became_deleted:
+                        if self.embedding_outbox is not None:
+                            try:
+                                self.embedding_outbox.discard(bucket_id)
+                            except Exception:
+                                pass
+                        if self.embedding_engine is not None:
+                            try:
+                                self.embedding_engine.delete_embedding(bucket_id)
+                            except Exception as cleanup_exc:
+                                logger.warning(
+                                    "Late derived-index cleanup failed / "
+                                    "迟到派生索引清理失败: %s: %s",
+                                    bucket_id,
+                                    cleanup_exc,
+                                )
+                        return
+
+                    latest_content = str((latest or {}).get("content") or "")
+                    latest_meaning = self._normalize_meaning_list(
+                        latest_metadata.get("meaning") or []
+                    )
+                    content_stable = (
+                        not content_changed or latest_content == indexed_content
+                    )
+                    meaning_stable = (
+                        not meaning_changed or latest_meaning == indexed_meaning
+                    )
+                    if content_stable and meaning_stable:
+                        return
+                logger.warning(
+                    "Derived index changed repeatedly / 派生索引连续变化，"
+                    "已保留 outbox 最新期望状态: %s",
+                    bucket_id,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Post-update indexing failed for %s: %s: %s",
+                bucket_id,
+                type(exc).__name__,
+                exc,
+            )
 
     async def add_comment(
         self,
@@ -642,6 +951,17 @@ class BucketManager:
         except OSError as e:
             logger.error(f"Failed to delete bucket file / 删除桶文件失败: {file_path}: {e}")
             return False
+
+        if self.embedding_outbox is not None:
+            try:
+                self.embedding_outbox.discard(bucket_id)
+            except Exception as exc:
+                logger.warning("discard embedding outbox failed for %s: %s", bucket_id, exc)
+        if self.embedding_engine is not None:
+            try:
+                self.embedding_engine.delete_embedding(bucket_id)
+            except Exception as exc:
+                logger.warning("delete embedding failed for %s: %s", bucket_id, exc)
 
         logger.info(f"Deleted bucket / 删除记忆桶: {bucket_id}")
         return True

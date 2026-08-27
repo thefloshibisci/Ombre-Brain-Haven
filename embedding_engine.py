@@ -12,6 +12,7 @@
 # ============================================================
 
 import os
+import hashlib
 import json
 import math
 import sqlite3
@@ -81,6 +82,8 @@ class EmbeddingEngine:
         """)
         self._ensure_column(conn, "embeddings", "model", "TEXT")
         self._ensure_column(conn, "embeddings", "dimension", "INTEGER")
+        self._ensure_column(conn, "embeddings", "content_hash", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column(conn, "embeddings", "meaning_embedding", "TEXT")
         conn.commit()
         conn.close()
 
@@ -97,7 +100,8 @@ class EmbeddingEngine:
             embedding = await self._generate_embedding(content, kind="document")
             if not embedding:
                 return False
-            self._store_embedding(bucket_id, embedding)
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            self._store_embedding(bucket_id, embedding, digest)
             return True
         except Exception as e:
             logger.warning(f"Embedding generation failed for {bucket_id}: {e}")
@@ -120,16 +124,47 @@ class EmbeddingEngine:
             logger.warning(f"Embedding API call failed: {e}")
             return []
 
-    def _store_embedding(self, bucket_id: str, embedding: list[float]):
+    def _store_embedding(self, bucket_id: str, embedding: list[float], content_hash: str = ""):
         """Store embedding in SQLite."""
         from utils import now_iso
         conn = sqlite3.connect(self.db_path)
         conn.execute(
             """
-            INSERT OR REPLACE INTO embeddings (bucket_id, embedding, model, dimension, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO embeddings (bucket_id, embedding, model, dimension, updated_at, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (bucket_id, json.dumps(embedding), self.model, len(embedding), now_iso()),
+            (bucket_id, json.dumps(embedding), self.model, len(embedding), now_iso(), content_hash),
+        )
+        conn.commit()
+        conn.close()
+
+    async def generate_and_store_meaning(self, bucket_id: str, meaning_text: str) -> bool:
+        """Generate and store a separate vector for the latest meaning line."""
+        if not self.enabled or not meaning_text or not meaning_text.strip():
+            return False
+        try:
+            embedding = await self._generate_embedding(meaning_text, kind="document")
+            if not embedding:
+                return False
+            self._store_meaning_embedding(bucket_id, embedding)
+            return True
+        except Exception as e:
+            logger.warning(f"Meaning embedding generation failed for {bucket_id}: {e}")
+            return False
+
+    def _store_meaning_embedding(self, bucket_id: str, embedding: list[float]):
+        from utils import now_iso
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            """
+            INSERT INTO embeddings (bucket_id, embedding, model, dimension, updated_at, content_hash, meaning_embedding)
+            VALUES (?, '', ?, ?, ?, '', ?)
+            ON CONFLICT(bucket_id) DO UPDATE SET
+                meaning_embedding=excluded.meaning_embedding,
+                updated_at=excluded.updated_at
+            """
+            ,
+            (bucket_id, self.model, len(embedding), now_iso(), json.dumps(embedding)),
         )
         conn.commit()
         conn.close()
@@ -140,6 +175,53 @@ class EmbeddingEngine:
         conn.execute("DELETE FROM embeddings WHERE bucket_id = ?", (bucket_id,))
         conn.commit()
         conn.close()
+
+    def delete_meaning_embedding(self, bucket_id: str):
+        """Clear the meaning vector while preserving the content vector."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "UPDATE embeddings SET meaning_embedding = NULL WHERE bucket_id = ?",
+            (bucket_id,),
+        )
+        conn.execute(
+            "DELETE FROM embeddings WHERE bucket_id = ? "
+            "AND TRIM(embedding) = '' AND meaning_embedding IS NULL",
+            (bucket_id,),
+        )
+        conn.commit()
+        conn.close()
+
+    def list_content_ids(self) -> list[str]:
+        """Return IDs that have a real content vector, not only meaning data."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT bucket_id FROM embeddings WHERE TRIM(embedding) <> ''"
+            ).fetchall()
+            return [str(row[0]) for row in rows]
+        finally:
+            conn.close()
+
+    def list_content_hashes(self) -> dict[str, str]:
+        """Return hashes recorded by new writes; legacy rows contain ``""``."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT bucket_id, content_hash FROM embeddings"
+            ).fetchall()
+            return {str(bucket_id): str(digest or "") for bucket_id, digest in rows}
+        finally:
+            conn.close()
+
+    def get_content_hash(self, bucket_id: str) -> str:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT content_hash FROM embeddings WHERE bucket_id = ?", (bucket_id,)
+            ).fetchone()
+            return str(row[0] or "") if row else ""
+        finally:
+            conn.close()
 
     async def get_embedding(self, bucket_id: str) -> list[float] | None:
         """Retrieve stored embedding for a bucket. Returns None if not found."""

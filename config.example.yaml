@@ -162,6 +162,13 @@ embedding:
   #   OMBRE_EMBEDDING_ENABLED
   #   OMBRE_EMBEDDING_MAX_CHARS
   #   OMBRE_EMBEDDING_QUERY_INSTRUCTION
+  # Background derived-index queue / 后台向量索引队列
+  # background_indexing: true
+  # retry_base_seconds: 5.0
+  # retry_max_seconds: 300.0
+  # circuit_failure_threshold: 3
+  # circuit_base_seconds: 30.0
+  # circuit_max_seconds: 600.0
 
 # --- Reranker / 重排序配置 ---
 # Uses the embedding base_url/api_key when these are left empty.

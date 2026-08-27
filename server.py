@@ -73,6 +73,7 @@ from decay_engine import DecayEngine
 from darkroom import DarkroomStore
 from dream_engine import DreamEngine
 from embedding_engine import EmbeddingEngine
+from embedding_outbox import EmbeddingOutbox
 from favorite_tags import has_favorite_memory_tag, has_favorite_policy_tag
 from gateway_state import GatewayStateStore
 from identity import identity_names
@@ -168,6 +169,9 @@ bucket_mgr = BucketManager(config)                  # Bucket manager / 记忆桶
 dehydrator = Dehydrator(config)                      # Dehydrator / 脱水器
 decay_engine = DecayEngine(config, bucket_mgr)       # Decay engine / 衰减引擎
 embedding_engine = EmbeddingEngine(config)            # Embedding engine / 向量化引擎
+bucket_mgr.attach_embedding_engine(embedding_engine)
+embedding_outbox = EmbeddingOutbox(config, bucket_mgr, embedding_engine)
+bucket_mgr.attach_embedding_outbox(embedding_outbox)
 reranker_engine = RerankerEngine(config)              # Reranker / 召回重排序
 recall_diagnostics = RecallDiagnosticsLogger(config)  # Recall diagnostics / 召回诊断
 import_engine = ImportEngine(config, bucket_mgr, dehydrator, embedding_engine)  # Import engine / 导入引擎
@@ -3075,10 +3079,9 @@ def _refresh_entity_edges_for_bucket(bucket: dict | None) -> int:
 def _queue_embedding_refresh(bucket_id: str) -> bool:
     if not bucket_id or not getattr(embedding_engine, "enabled", False):
         return False
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return False
+    if getattr(embedding_outbox, "running", False):
+        return True
+    loop = asyncio.get_running_loop()
     loop.create_task(_refresh_bucket_embedding_async(bucket_id))
     return True
 

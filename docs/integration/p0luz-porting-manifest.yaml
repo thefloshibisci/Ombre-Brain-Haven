@@ -58,7 +58,7 @@ batches:
   - id: B2
     name: embedding-outbox
     disposition: PORT_P0LUZ
-    status: pending
+    status: done
     sources:
       - src/ombrebrain/storage/embedding_outbox.py
       - src/embedding_engine.py

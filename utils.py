@@ -13,6 +13,7 @@ import os
 import re
 import uuid
 import yaml
+import math
 import logging
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -20,6 +21,9 @@ from zoneinfo import ZoneInfo
 
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
+
+_BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
+_BOOL_FALSE = frozenset({"0", "false", "no", "off"})
 
 
 def _date_hint(year: int, month: int, day: int, label: str, tz=LOCAL_TZ) -> dict[str, str] | None:
@@ -960,3 +964,38 @@ def now_iso() -> str:
     返回当前时间的 ISO 格式字符串。
     """
     return datetime.now(LOCAL_TZ).isoformat(timespec="seconds")
+
+
+def parse_bool(value, *, default=...) -> bool:
+    """Parse an explicit boolean without Python's ``bool('false')`` trap.
+
+    JSON/YAML callers may supply booleans, 0/1, or common textual forms. Other
+    values are rejected unless a default is supplied. This keeps public API
+    boundaries predictable while still accepting environment-style strings.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _BOOL_TRUE:
+            return True
+        if normalized in _BOOL_FALSE:
+            return False
+    # Ellipsis is a process-wide singleton, so this check remains valid even
+    # if a hot-update/test reloads utils while callers retain the old function.
+    if default is not ...:
+        return bool(default)
+    raise ValueError(f"Invalid boolean: {value!r}")
+
+
+def positive_float(value, default: float) -> float:
+    """Parse a positive numeric config value, falling back to default."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if not math.isfinite(parsed) or parsed <= 0:
+        return float(default)
+    return parsed
