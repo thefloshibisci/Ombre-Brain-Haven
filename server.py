@@ -70,6 +70,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from bucket_manager import BucketManager
 from dehydrator import Dehydrator
 from decay_engine import DecayEngine
+from errors import llm_step_failed_error
 from darkroom import DarkroomStore
 from dream_engine import DreamEngine
 from embedding_engine import EmbeddingEngine
@@ -126,6 +127,7 @@ from persona_engine import PersonaStateEngine
 from persona_event_selection import select_persona_events
 from portrait_engine import DailyPortraitMaintainer
 from raw_events import RawEventStore
+from retry_guard import request_fingerprint, run_once
 from reflection_engine import ReflectionEngine
 from recall_diagnostics import RecallDiagnosticsLogger
 from reminder_store import ReminderStore
@@ -8755,87 +8757,154 @@ async def _grow_direct_structured_content(content: str, title: str = "", gate_pr
 
 
 @mcp.tool()
-async def grow(content: str, auto: bool = False, source: str = "", title: str = "", context: Context | None = None) -> str:
+async def grow(content: str, auto: bool = False, source: str = "", title: str = "", context: Context | None = None, test_data: bool = False) -> str:
     """把筛过的长片段拆成少量长期记忆；单条事实/承诺/偏好优先 hold，旧记忆补感受优先 comment_bucket。只有多个已筛选长期记忆点才用 grow，别塞整段流水账。保留原文称呼、昵称、互称、自称和原话，不要把临时称呼推成稳定画像事实。title 可选，短内容时传了就用你给的标题。普通记忆 content 的最小写入就是正文；只有确实需要结构化时才按需使用 ### moment、### original、### reflection；reflection 必须写成“我……”第一人称。不要写 ### affect_anchor、### followup 或 ### todo：长期回应变化写进 reflection，到时提醒用 reminder_create。feel 年轮只写第一人称正文，不写标题或任何 Markdown 分段。"""
     await decay_engine.ensure_started()
 
     if not content or not content.strip():
         return "内容为空，无法整理。"
 
-    auto = _bool_value(auto, False)
-    source = str(source or "").strip() or _grow_source_from_context(context)
-    if not source and _looks_like_operit_auto_grow_content(content):
-        source = "operit"
-    gate_decision = None
-    if memory_write_gate.should_gate(auto=auto, source=source):
-        gate_decision = await memory_write_gate.evaluate(
-            content,
-            source=source,
-            bucket_mgr=bucket_mgr,
-            auto=auto,
-        )
-        if not gate_decision.allow:
-            return _format_write_gate_result(gate_decision)
-    gate_prefix = f"{_format_write_gate_result(gate_decision)}\n" if gate_decision else ""
-    content = str(content or "").strip()
-    if _is_grow_direct_content(content):
-        return await _grow_direct_structured_content(content, title=title, gate_prefix=gate_prefix)
+    async def execute_grow() -> str:
+        auto_value = _bool_value(auto, False)
+        source_value = str(source or "").strip() or _grow_source_from_context(context)
+        if not source_value and _looks_like_operit_auto_grow_content(content):
+            source_value = "operit"
+        gate_decision = None
+        if memory_write_gate.should_gate(auto=auto_value, source=source_value):
+            gate_decision = await memory_write_gate.evaluate(
+                content,
+                source=source_value,
+                bucket_mgr=bucket_mgr,
+                auto=auto_value,
+            )
+            if not gate_decision.allow:
+                return _format_write_gate_result(gate_decision)
+        gate_prefix = f"{_format_write_gate_result(gate_decision)}\n" if gate_decision else ""
+        content_value = str(content or "").strip()
+        if _is_grow_direct_content(content_value):
+            return await _grow_direct_structured_content(content_value, title=title, gate_prefix=gate_prefix)
 
-    content = _normalize_memory_sections_for_write(content)
+        content_value = _normalize_memory_sections_for_write(content_value)
 
-    # --- Short content fast path: skip digest, use hold logic directly ---
-    # --- 短内容快速路径：跳过 digest 拆分，直接走 hold 逻辑省一次 API ---
-    # For very short inputs (like "1"), calling digest is wasteful:
-    # it sends the full DIGEST_PROMPT (~800 tokens) to DeepSeek for nothing.
-    # Instead, run analyze + create directly.
-    if len(content.strip()) < 30:
-        logger.info(f"grow short-content fast path: {len(content.strip())} chars")
+        # --- Short content fast path: skip digest, use hold logic directly ---
+        # --- 短内容快速路径：跳过 digest 拆分，直接走 hold 逻辑省一次 API ---
+        # For very short inputs (like "1"), calling digest is wasteful:
+        # it sends the full DIGEST_PROMPT (~800 tokens) to DeepSeek for nothing.
+        # Instead, run analyze + create directly.
+        if len(content_value.strip()) < 30:
+            logger.info(f"grow short-content fast path: {len(content_value.strip())} chars")
+            try:
+                analysis = await dehydrator.analyze(content_value)
+            except Exception as e:
+                logger.warning(f"Fast-path analyze failed / 快速路径打标失败: {e}")
+                analysis = {
+                    "domain": ["general"], "valence": 0.5, "arousal": 0.3,
+                    "tags": [], "suggested_name": "",
+                }
+            fast_tags = analysis.get("tags", [])
+            content_value = await _auto_generate_write_moment_if_needed(
+                content_value,
+                fast_tags,
+                domain=analysis.get("domain", ["general"]),
+            )
+            fast_classification = normalize_write_classification(
+                memory_subject=analysis.get("memory_subject", ""),
+                memory_layer=analysis.get("memory_layer", ""),
+                tags=fast_tags,
+                content=content_value,
+            )
+            if _has_favorite_tag(fast_tags) and not _has_favorite_reason(content_value):
+                return _favorite_reason_error()
+            bucket_id, result_name, is_merged, related_bucket = await _merge_or_create(
+                content=content_value.strip(),
+                tags=fast_tags,
+                importance=analysis.get("importance", 5) if isinstance(analysis.get("importance"), int) else 5,
+                domain=analysis.get("domain", ["general"]),
+                valence=analysis.get("valence", 0.5),
+                arousal=analysis.get("arousal", 0.3),
+                name=title.strip() or analysis.get("suggested_name", ""),
+                allow_merge=False,
+                memory_subject=fast_classification["memory_subject"],
+                memory_layer=fast_classification["memory_layer"],
+                memory_classification_source=fast_classification["memory_classification_source"],
+            )
+            _queue_memory_enrichment(bucket_id)
+            action = "合并" if is_merged else "新建"
+            related_note = _format_readonly_related_memory(related_bucket) if related_bucket else ""
+            return f"{gate_prefix}{action} → {result_name} | {','.join(analysis.get('domain', []))} V{analysis.get('valence', 0.5):.1f}/A{analysis.get('arousal', 0.3):.1f}{related_note}"
+
+        # --- Step 1: let API split and organize / 让 API 拆分整理 ---
         try:
-            analysis = await dehydrator.analyze(content)
+            items = await dehydrator.digest(content_value)
         except Exception as e:
-            logger.warning(f"Fast-path analyze failed / 快速路径打标失败: {e}")
-            analysis = {
-                "domain": ["general"], "valence": 0.5, "arousal": 0.3,
-                "tags": [], "suggested_name": "",
-            }
-        fast_tags = analysis.get("tags", [])
-        content = await _auto_generate_write_moment_if_needed(
-            content,
-            fast_tags,
-            domain=analysis.get("domain", ["general"]),
-        )
-        fast_classification = normalize_write_classification(
-            memory_subject=analysis.get("memory_subject", ""),
-            memory_layer=analysis.get("memory_layer", ""),
-            tags=fast_tags,
-            content=content,
-        )
-        if _has_favorite_tag(fast_tags) and not _has_favorite_reason(content):
-            return _favorite_reason_error()
-        bucket_id, result_name, is_merged, related_bucket = await _merge_or_create(
-            content=content.strip(),
-            tags=fast_tags,
-            importance=analysis.get("importance", 5) if isinstance(analysis.get("importance"), int) else 5,
-            domain=analysis.get("domain", ["general"]),
-            valence=analysis.get("valence", 0.5),
-            arousal=analysis.get("arousal", 0.3),
-            name=title.strip() or analysis.get("suggested_name", ""),
-            allow_merge=False,
-            memory_subject=fast_classification["memory_subject"],
-            memory_layer=fast_classification["memory_layer"],
-            memory_classification_source=fast_classification["memory_classification_source"],
-        )
-        _queue_memory_enrichment(bucket_id)
-        action = "合并" if is_merged else "新建"
-        related_note = _format_readonly_related_memory(related_bucket) if related_bucket else ""
-        return f"{gate_prefix}{action} → {result_name} | {','.join(analysis.get('domain', []))} V{analysis.get('valence', 0.5):.1f}/A{analysis.get('arousal', 0.3):.1f}{related_note}"
+            logger.error(f"Memory digest failed / 长内容摘记失败: {e}")
+            api_available = bool(os.getenv("OMBRE_COMPRESS_API_KEY"))
+            failure = llm_step_failed_error("长内容摘记", api_available=api_available)
+            return f"{gate_prefix}{failure.public_message}"
 
-    # --- Step 1: let API split and organize / 让 API 拆分整理 ---
-    try:
-        items = await dehydrator.digest(content)
-    except Exception as e:
-        logger.error(f"Memory digest failed / 长内容摘记失败: {e}")
-        return f"{gate_prefix}长内容摘记失败: {e}"
+        if not items:
+            return f"{gate_prefix}内容为空或整理失败。"
+
+        results = []
+        created = 0
+        merged = 0
+
+        # --- Step 2: create each item (with per-item error handling) ---
+        # --- 逐条新建（单条失败不影响其他）；grow 不自动揉写旧桶 ---
+        for item in items:
+            try:
+                item_tags = item.get("tags", [])
+                item_content = _normalize_memory_sections_for_write(item.get("content", ""))
+                contract_error = _memory_write_contract_error(item_content)
+                if contract_error:
+                    results.append(f"⚠️{item.get('name', '未命名')}: {contract_error}")
+                    continue
+                item_content = await _auto_generate_write_moment_if_needed(
+                    item_content,
+                    item_tags,
+                    domain=item.get("domain", ["general"]),
+                )
+                item_classification = normalize_write_classification(
+                    memory_subject=item.get("memory_subject", ""),
+                    memory_layer=item.get("memory_layer", ""),
+                    tags=item_tags,
+                    content=item_content,
+                )
+                if _has_favorite_tag(item_tags) and not _has_favorite_reason(item_content):
+                    results.append("⚠️favorite 缺少 reflection")
+                    continue
+                bucket_id, result_name, is_merged, related_bucket = await _merge_or_create(
+                    content=item_content,
+                    tags=item_tags,
+                    importance=item.get("importance", 5),
+                    domain=item.get("domain", ["general"]),
+                    valence=item.get("valence", 0.5),
+                    arousal=item.get("arousal", 0.3),
+                    name=item.get("name", ""),
+                    allow_merge=False,
+                    memory_subject=item_classification["memory_subject"],
+                    memory_layer=item_classification["memory_layer"],
+                    memory_classification_source=item_classification["memory_classification_source"],
+                )
+                _queue_memory_enrichment(bucket_id)
+
+                if is_merged:
+                    results.append(f"📎{result_name}")
+                    merged += 1
+                else:
+                    results.append(f"📝{item.get('name', result_name)}")
+                    created += 1
+            except Exception as e:
+                logger.warning(
+                    f"Failed to process diary item / 日记条目处理失败: "
+                    f"{item.get('name', '?')}: {e}"
+                )
+                results.append(f"⚠️{item.get('name', '?')}")
+
+        return f"{gate_prefix}{len(items)}条|新{created}合{merged}\n" + "\n".join(results)
+
+    fingerprint = request_fingerprint(content=content, items=None, test_data=test_data)
+    return await run_once(fingerprint, execute_grow)
 
     if not items:
         return f"{gate_prefix}内容为空或整理失败。"

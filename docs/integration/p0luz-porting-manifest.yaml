@@ -89,7 +89,7 @@ batches:
   - id: B3
     name: grow-idempotency
     disposition: PORT_P0LUZ
-    status: pending
+    status: done
     sources:
       - src/tools/grow/retry_guard.py
       - src/tools/grow/core.py
