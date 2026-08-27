@@ -3,6 +3,7 @@ tests/*
 !tests/test_public_error_sanitization.py
 !tests/test_embedding_outbox.py
 !tests/test_grow_idempotency.py
+!tests/test_source_layer.py
 *.pyc
 *.pyo
 .env

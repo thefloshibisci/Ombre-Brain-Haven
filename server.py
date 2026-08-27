@@ -134,7 +134,10 @@ from reminder_store import ReminderStore
 from reranker_engine import RerankerEngine
 from self_anchor import SELF_ANCHOR_TAG, is_self_anchor_bucket, is_self_anchor_metadata
 from scripts.migrate_affect_anchor_sections import plan_bucket_migration
+from source_bindings import attach as _source_bindings_attach, detach as _source_bindings_detach, restore as _source_bindings_restore
 from source_refs import source_ref_window
+from source_read import dispatch as _source_read_dispatch
+from source_store import SourceStore
 from word_map import WordMapStore, reflection_identity_terms
 from utils import (
     bucket_content_for_recall,
@@ -168,6 +171,7 @@ def _coerce_memory_id(value) -> str:
 
 # --- Initialize core components / 初始化核心组件 ---
 bucket_mgr = BucketManager(config)                  # Bucket manager / 记忆桶管理器
+source_store = SourceStore(config["buckets_dir"])  # Immutable source evidence store / 不可变原文证据
 dehydrator = Dehydrator(config)                      # Dehydrator / 脱水器
 decay_engine = DecayEngine(config, bucket_mgr)       # Decay engine / 衰减引擎
 embedding_engine = EmbeddingEngine(config)            # Embedding engine / 向量化引擎
@@ -8966,6 +8970,31 @@ async def grow(content: str, auto: bool = False, source: str = "", title: str = 
             results.append(f"⚠️{item.get('name', '?')}")
 
     return f"{gate_prefix}{len(items)}条|新{created}合{merged}\n" + "\n".join(results)
+
+
+# =============================================================
+# Tool 3.4: source evidence — immutable original-text evidence
+# 工具 3.4：原文证据 — 不可变原文绑定与受控读取
+# =============================================================
+@mcp.tool()
+async def source_read(bucket_id: str, expected_title: str, scope: str = "event", cursor: int = 0, max_tokens: int = 6000, source_slots: list[int] | None = None, all_sources: bool = False) -> str:
+    """显式读取一个记忆桶对应的原文证据。必须给出精确 bucket_id 与 title；多 Source 默认只回 slot/ranges/status 清单，显式 source_slots 或 all_sources 才读活动原文。分页时保持同一桶、标题、scope 与 Source 选择。"""
+    return await _source_read_dispatch(bucket_mgr, source_store, bucket_id=bucket_id, expected_title=expected_title, scope=scope, cursor=cursor, max_tokens=max_tokens, source_slots=source_slots, all_sources=all_sources)
+
+@mcp.tool()
+async def source_attach(bucket_id: str, expected_title: str, source_content: str, source_ranges: list[list[int]] | None = None) -> str:
+    """给精确 bucket_id + title 的已有桶后补一份独立不可变 Source；只改证据绑定，不改正文、活跃度或生命周期。"""
+    return await _source_bindings_attach(bucket_mgr, source_store, bucket_id, expected_title, source_content, source_ranges)
+
+@mcp.tool()
+async def source_detach(bucket_id: str, expected_title: str, source_slot: int) -> str:
+    """断开一个稳定 Source slot，只停用本桶绑定，不删除共享 Source blob，也不改变桶生命周期。"""
+    return await _source_bindings_detach(bucket_mgr, bucket_id, expected_title, source_slot)
+
+@mcp.tool()
+async def source_restore(bucket_id: str, expected_title: str, source_slot: int) -> str:
+    """恢复一个 detached Source slot 的原绑定；只恢复证据引用，不恢复 archived 桶。桶生命周期恢复请用 trace(..., restore=True)。"""
+    return await _source_bindings_restore(bucket_mgr, bucket_id, expected_title, source_slot)
 
 
 # =============================================================

@@ -36,7 +36,7 @@ import json
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import frontmatter
 import jieba
@@ -46,6 +46,7 @@ from memory_relevance import content_terms_for_query, memory_relevance_options_f
 from query_terms import GENERIC_LEXICAL_STOPWORDS
 from media_store import MediaStore
 from utils import (
+    atomic_write_text,
     bucket_content_for_recall,
     generate_bucket_id,
     now_iso,
@@ -258,8 +259,7 @@ class BucketManager:
 
         try:
             post = frontmatter.Post(linked_content, **metadata)
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(frontmatter.dumps(post))
+            atomic_write_text(file_path, frontmatter.dumps(post))
         except Exception as e:
             if persisted_media:
                 self.media_store.cleanup(bucket_id, [])
@@ -283,6 +283,40 @@ class BucketManager:
             meaning_changed=bool(metadata.get("meaning")),
         )
         return bucket_id
+
+    async def mutate_source_links(self, bucket_id: str, mutation) -> Any:
+        """Atomically change evidence bindings only, including archived buckets.
+
+        The callback receives the loaded frontmatter post and returns
+        ``(changed, result)``.  This deliberately bypasses normal update()
+        lifecycle/recency behaviour and derived indexing while retaining an
+        in-process write turn.
+        """
+        normalized_id = str(bucket_id or "").strip()
+        if not normalized_id:
+            return None
+        lock = self._derived_index_locks.get(normalized_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._derived_index_locks[normalized_id] = lock
+        async with lock:
+            file_path = self._find_bucket_file(normalized_id)
+            if not file_path:
+                return None
+            try:
+                post = frontmatter.load(file_path)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load bucket for source binding / 加载桶原文绑定失败: "
+                    "%s: %s",
+                    file_path,
+                    exc,
+                )
+                return None
+            changed, result = mutation(post)
+            if changed:
+                atomic_write_text(file_path, frontmatter.dumps(post))
+            return result
 
     # ---------------------------------------------------------
     # Read bucket content
@@ -452,8 +486,7 @@ class BucketManager:
         post["last_active"] = kwargs.get("last_active") or now_iso()
 
         try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(frontmatter.dumps(post))
+            atomic_write_text(file_path, frontmatter.dumps(post))
         except Exception as e:
             if "media" in kwargs or "media_append" in kwargs:
                 self.media_store.cleanup(bucket_id, original_media)
@@ -468,8 +501,7 @@ class BucketManager:
         domain = post.get("domain", ["未分类"])
         if kwargs.get("pinned") and post.get("type") != "permanent":
             post["type"] = "permanent"
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(frontmatter.dumps(post))
+            atomic_write_text(file_path, frontmatter.dumps(post))
             self._move_bucket(file_path, self.permanent_dir, domain)
         elif "domain" in kwargs and post.get("type") != "feel":
             bucket_type = str(post.get("type") or "dynamic")

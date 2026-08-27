@@ -121,7 +121,7 @@ batches:
   - id: B4
     name: reversible-source-bindings
     disposition: MERGE_BEHAVIOR
-    status: pending
+    status: done
     sources:
       - src/ombrebrain/storage/source_store.py
       - src/tools/source_bindings/core.py
@@ -149,7 +149,7 @@ batches:
         - tests/test_source_layer.py
         - tests/test_backup_archive.py
       haven_new:
-        - tests/test_source_bindings.py
+        - tests/test_source_layer.py
     acceptance:
       - binding operations do not alter bucket body, lifecycle, recency or embedding
       - archived buckets remain archived
