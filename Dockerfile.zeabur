@@ -23,11 +23,9 @@ COPY dashboard.html .
 COPY dashboard_assets ./dashboard_assets
 COPY config.example.yaml ./config.yaml
 
-# Zeabur builds this Dockerfile from the workspace root, where the
-# independently tracked xinchao-nian checkout lives beside Ombre-Brain.
-COPY xinchao-nian/xinchao/package.json ./xinchao/package.json
-COPY xinchao-nian/xinchao/configs ./xinchao/configs
-COPY xinchao-nian/xinchao/src ./xinchao/src
+COPY xinchao/package.json ./xinchao/package.json
+COPY xinchao/configs ./xinchao/configs
+COPY xinchao/src ./xinchao/src
 
 RUN chmod +x scripts/*.sh
 

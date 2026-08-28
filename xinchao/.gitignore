@@ -1,0 +1,8 @@
+*
+!.gitignore
+!Dockerfile
+!package.json
+!configs
+!configs/**
+!src
+!src/**
