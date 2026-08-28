@@ -254,7 +254,7 @@ batches:
   - id: B7
     name: import-backup-and-id-remap
     disposition: MERGE_BEHAVIOR
-    status: pending
+    status: done
     sources:
       - src/migration_engine.py
       - src/ombrebrain/storage/backup_archive.py
