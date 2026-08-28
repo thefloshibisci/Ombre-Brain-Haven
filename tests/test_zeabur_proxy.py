@@ -141,7 +141,7 @@ def test_entrypoint_creates_credential_free_runtime_config(monkeypatch, tmp_path
 def test_entrypoint_isolates_child_ports(monkeypatch):
     monkeypatch.setenv("PORT", "9123")
     monkeypatch.setenv("OMBRE_XINCHAO_PORT", "18110")
-    monkeypatch.delenv("OMBRE_PROXY_PORT", raising=False)
+    monkeypatch.setenv("OMBRE_PROXY_PORT", "9123")
     monkeypatch.delenv("OMBRE_PORT", raising=False)
     monkeypatch.delenv("OMBRE_GATEWAY_PORT", raising=False)
 
@@ -157,3 +157,13 @@ def test_entrypoint_isolates_child_ports(monkeypatch):
     assert gateway_env["OMBRE_GATEWAY_PORT"] == "8010"
     assert "PORT" not in gateway_env
     assert xinchao_env["PORT"] == "18110"
+
+
+def test_entrypoint_prefers_explicit_proxy_port(monkeypatch):
+    monkeypatch.setenv("PORT", "8080")
+    monkeypatch.setenv("OMBRE_PROXY_PORT", "9000")
+
+    proxy_env = entrypoint_zeabur.build_child_env("proxy")
+
+    assert proxy_env["OMBRE_PROXY_PORT"] == "9000"
+    assert "PORT" not in proxy_env

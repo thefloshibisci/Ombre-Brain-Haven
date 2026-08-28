@@ -50,7 +50,7 @@ def build_child_env(role: str) -> dict[str, str]:
     """
     env = os.environ.copy()
     if role == "proxy":
-        env["OMBRE_PROXY_PORT"] = os.environ.get("PORT", "9000")
+        env["OMBRE_PROXY_PORT"] = os.environ.get("OMBRE_PROXY_PORT", "9000")
         env.pop("PORT", None)
     elif role == "brain":
         env["OMBRE_PORT"] = os.environ.get("OMBRE_PORT", "8000")
@@ -65,6 +65,8 @@ def build_child_env(role: str) -> dict[str, str]:
 
 
 def main() -> int:
+    if "OMBRE_PROXY_PORT" not in os.environ:
+        os.environ["OMBRE_PROXY_PORT"] = os.environ.get("PORT", "9000")
     os.environ.setdefault("OMBRE_GATEWAY_PORT", "8010")
     os.environ.setdefault("OMBRE_XINCHAO_PORT", "18110")
     os.environ.setdefault("OMBRE_TRANSPORT", "streamable-http")
