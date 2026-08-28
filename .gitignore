@@ -13,6 +13,7 @@ tests/*
 !tests/test_import_keep_both_references.py
 !tests/test_mcp_schema_contract.py
 !tests/test_migrate_supabase_archive.py
+!tests/test_zeabur_proxy.py
 *.pyc
 *.pyo
 .env
@@ -21,6 +22,9 @@ tests/*
 .claude/hooks/__pycache__/
 .vscode/
 config.yaml
+Dockerfile.zeabur.bak
+entrypoint_zeabur.py.bak
+proxy_server.py.bak
 compose.local.yml
 connection_guide.txt
 start_mobile.sh

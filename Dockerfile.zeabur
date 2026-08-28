@@ -1,0 +1,44 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Xinchao is bundled as an internal sidecar. Node 20 matches its supported runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY *.py .
+COPY resources ./resources
+COPY scripts ./scripts
+COPY dashboard.html .
+COPY dashboard_assets ./dashboard_assets
+COPY config.example.yaml ./config.yaml
+
+# Zeabur builds this Dockerfile from the workspace root, where the
+# independently tracked xinchao-nian checkout lives beside Ombre-Brain.
+COPY xinchao-nian/xinchao/package.json ./xinchao/package.json
+COPY xinchao-nian/xinchao/configs ./xinchao/configs
+COPY xinchao-nian/xinchao/src ./xinchao/src
+
+RUN chmod +x scripts/*.sh
+
+ENV OMBRE_TRANSPORT=streamable-http \
+    OMBRE_BUCKETS_DIR=/data \
+    OMBRE_STATE_DIR=/state \
+    OMBRE_PROXY_PORT=9000 \
+    OMBRE_GATEWAY_PORT=8010 \
+    OMBRE_XINCHAO_PORT=18110
+
+VOLUME ["/data", "/state"]
+EXPOSE 9000
+
+CMD ["python", "entrypoint_zeabur.py"]
