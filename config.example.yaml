@@ -395,6 +395,18 @@ gateway:
   retrieval_mode: graph       # graph | bucket; bucket skips moment graph diffusion
   operit_context_rewrite_enabled: false # Operit-only text turn cleanup: split stable/activity attachment context before forwarding
   bucket_list_cache_ttl_seconds: 300 # cache active bucket list inside Gateway; 0 disables
+  # Experimental cross-client dynamic context bridge. The token is read only
+  # from the named environment variable, never from YAML.
+  # xinchao_adapter:
+  #   enabled: false
+  #   base_url: "http://127.0.0.1:8020"
+  #   service_token_env: "XINCHAO_SERVICE_TOKEN"
+  #   context_max_tokens: 600
+  #   read_timeout_seconds: 1.5
+  #   write_timeout_seconds: 2.0
+  #   continuity_limit: 6
+  #   notify_dynamic_state: true
+  #   outbox_enabled: true
   portrait_memory_enabled: true  # read-only stable portrait cache from profile_fact by default
   portrait_memory_budget: 360
   portrait_memory_max_sources: 8

@@ -101,6 +101,7 @@ from persona_event_selection import (
 from raw_events import RawEventStore, raw_event_text_looks_injected, strip_raw_client_context
 from reminder_store import ReminderStore
 from reranker_engine import RerankerEngine
+from xinchao_adapter import XinchaoAdapter
 from self_anchor import is_self_anchor_bucket, is_self_anchor_metadata
 from source_refs import source_ref_window
 from utils import (
@@ -827,9 +828,27 @@ class GatewayService:
 
         self.http_client = http_client or httpx.AsyncClient(timeout=60.0)
 
+        xinchao_cfg = self.gateway_cfg.get("xinchao_adapter", {})
+        if not isinstance(xinchao_cfg, dict):
+            xinchao_cfg = {}
+        self.xinchao_adapter = self._build_xinchao_adapter(xinchao_cfg, db_path=self.state_store.db_path)
+
     async def close(self) -> None:
+        await self.xinchao_adapter.stop_delivery_worker()
+        await self.xinchao_adapter.aclose()
         if self.http_client and not getattr(self.http_client, "is_closed", False):
             await self.http_client.aclose()
+
+    def _build_xinchao_adapter(self, raw_config: dict[str, Any], *, db_path: str) -> XinchaoAdapter:
+        try:
+            return XinchaoAdapter(raw_config, db_path=db_path, http_client=self.http_client)
+        except Exception as exc:
+            logger.warning("Xinchao adapter disabled after init failure: %s", safe_error_detail(exc))
+            return XinchaoAdapter(
+                {"xinchao_adapter": {"enabled": False}},
+                db_path=db_path,
+                http_client=self.http_client,
+            )
 
     async def warm_recall_runtime(self) -> None:
         started_at = time.perf_counter()
@@ -865,6 +884,7 @@ class GatewayService:
             len(moments),
             len(edges),
         )
+        await self.xinchao_adapter.start_delivery_worker()
 
     async def health_payload(self) -> dict:
         stats = await self.bucket_mgr.get_stats()
@@ -917,6 +937,7 @@ class GatewayService:
                 "current_inner_state_interval_rounds": self.current_inner_state_interval_rounds,
                 "direct_render_mode": self.direct_render_mode,
                 "retrieval_mode": self.retrieval_mode,
+                "xinchao_adapter": self.xinchao_adapter.status(),
                 "bucket_list_cache_ttl_seconds": self.bucket_list_cache_ttl_seconds,
                 "recall_fusion_mode": self.recall_fusion_mode,
                 "reranker": {
@@ -1876,6 +1897,7 @@ class GatewayService:
                     if str(request.headers.get("X-Ombre-Debug-Detail") or "").strip().lower() == "full"
                     else "compact"
                 ),
+                client_label=client_label,
             )
         except ValueError as exc:
             return JSONResponse(
@@ -2020,6 +2042,7 @@ class GatewayService:
                     if str(request.headers.get("X-Ombre-Debug-Detail") or "").strip().lower() == "full"
                     else "compact"
                 ),
+                client_label=client_label,
             )
         except ValueError as exc:
             return self._anthropic_error(str(exc), status_code=400)
@@ -2626,6 +2649,7 @@ class GatewayService:
         include_debug: bool = False,
         manage_turn_snapshot: bool = False,
         debug_detail: str = "full",
+        client_label: str = "",
     ) -> tuple[dict, list[str] | None] | tuple[dict, list[str] | None, dict[str, Any]]:
         prepare_started_at = time.perf_counter()
         prepare_steps_ms: dict[str, int] = {}
@@ -3158,6 +3182,15 @@ class GatewayService:
                 session_id,
             )
 
+        xinchao_context = await self.xinchao_adapter.fetch_context(
+            self.xinchao_adapter.map_session_id(
+                client_label,
+                session_id,
+            ),
+            existing_texts=messages,
+        )
+        xinchao_context_text = xinchao_context.text
+
         stage_started_at = time.perf_counter()
         stable_context, dynamic_context = self._build_injected_context_messages(
             persona_block=persona_block,
@@ -3165,6 +3198,7 @@ class GatewayService:
             core_memory=core_memory,
             portrait_memory=portrait_memory,
             just_now_context=just_now_context,
+            xinchao_context=xinchao_context_text,
             date_recall=date_recall,
             recent_context=recent_context,
             recalled_memory=recalled_memory,
@@ -4063,6 +4097,57 @@ class GatewayService:
             client=client,
             route=route,
         )
+        self._enqueue_xinchao_round(
+            session_id=session_id,
+            round_id=round_id,
+            user_text=user_text,
+            assistant_text=assistant_text,
+            client=client,
+            route=route,
+        )
+
+    def _enqueue_xinchao_round(
+        self,
+        *,
+        session_id: str,
+        round_id: int,
+        user_text: str,
+        assistant_text: str,
+        client: str,
+        route: str,
+    ) -> None:
+        if not self.xinchao_adapter.enabled or self.xinchao_adapter.outbox is None:
+            return
+        profile_id = str(getattr(self.persona_engine, "profile_id", "") or "default")
+        gateway_session_id = self.xinchao_adapter.map_session_id(client, session_id)
+        try:
+            continuity_item = self.xinchao_adapter.build_continuity_outbox_item(
+                profile_id=profile_id,
+                gateway_session_id=gateway_session_id,
+                round_id=round_id,
+                route=route,
+                user_text=user_text,
+                assistant_text=assistant_text,
+                client_label=client,
+            )
+            self.xinchao_adapter.outbox.enqueue(continuity_item)
+            if self.xinchao_adapter.notify_dynamic_state:
+                dynamic_item = self.xinchao_adapter.build_dynamic_event_outbox_item(
+                    profile_id=profile_id,
+                    gateway_session_id=gateway_session_id,
+                    round_id=round_id,
+                    route=route,
+                    tone="neutral",
+                )
+                self.xinchao_adapter.outbox.enqueue(dynamic_item)
+            self.xinchao_adapter._wake_worker()
+        except Exception as exc:
+            logger.warning(
+                "Xinchao outbox enqueue failed | session=%s round=%s error=%s",
+                session_id,
+                round_id,
+                safe_error_detail(exc),
+            )
 
     def _is_recent_duplicate_conversation_turn(
         self,
@@ -17878,6 +17963,7 @@ class GatewayService:
         memory_detail_recall_instruction: str = "",
         handoff_tool_hint: str = "",
         context_mode: str = "",
+        xinchao_context: str = "",
         date_persona_trace: str = "",
         date_recall: str = "",
     ) -> tuple[str, str]:
@@ -17889,6 +17975,7 @@ class GatewayService:
                 relationship_weather,
                 favorite_memory,
                 just_now_context,
+                xinchao_context,
                 date_recall,
                 recent_context,
                 recalled_memory,
@@ -17908,6 +17995,7 @@ class GatewayService:
                 persona_block,
                 relationship_weather,
                 favorite_memory,
+                xinchao_context,
                 date_recall,
                 recent_context,
                 recalled_memory,
@@ -17943,6 +18031,7 @@ class GatewayService:
                     dynamic_sections.extend(["", title, content])
 
             add_section("Just Now Chat Context", just_now_context)
+            add_section("Xinchao Recent Context", xinchao_context)
             add_section("Date Recall", date_recall)
             add_section("Context Mode", f"context_mode: {context_mode}" if context_mode.strip() else "")
             add_section("照顾备忘", active_reminders)
@@ -18901,6 +18990,7 @@ class GatewayService:
         conflict_nudge_debug: dict[str, Any],
         just_now_context: str,
         just_now_context_debug: dict[str, Any],
+        xinchao_context: str,
         date_recall: str,
         date_recall_debug: dict[str, Any],
         date_recall_bucket_ids: list[str],
@@ -19102,6 +19192,8 @@ class GatewayService:
             "portrait_memory_debug": portrait_memory_debug or self._portrait_memory_debug_base(),
             "just_now_context_injected": bool(str(just_now_context or "").strip()),
             "just_now_context_debug": just_now_context_debug or self._just_now_context_debug_base(query),
+            "xinchao_context": xinchao_context,
+            "xinchao_context_injected": bool(str(xinchao_context or "").strip()),
             "date_recall_injected": bool(str(date_recall or "").strip()),
             "date_recall_debug": date_recall_debug or self._date_recall_debug_base(query),
             "date_recall_bucket_ids": date_recall_bucket_ids,
@@ -19707,6 +19799,7 @@ class GatewayService:
             "",
             "",
             just_now_context=str(debug_payload.get("just_now_context") or ""),
+            xinchao_context=str(debug_payload.get("xinchao_context") or ""),
             recent_context=str(debug_payload.get("recent_context") or ""),
             recalled_memory=str(debug_payload.get("recalled_memory") or ""),
             related_memory=(
