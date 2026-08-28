@@ -10,6 +10,7 @@ tests/*
 !tests/test_catalog_contract.py
 !tests/test_test_data_contract.py
 !tests/test_import_keep_both_references.py
+!tests/test_mcp_schema_contract.py
 *.pyc
 *.pyo
 .env

@@ -6574,9 +6574,9 @@ async function showDetail(id) {
       '</div>' +
       '<div class="bucket-content-block">' +
         '<button id="bucket-content-edit-button" type="button" class="detail-edit-button" onclick="startBucketContentEdit(\'' + jsString(id) + '\')" aria-label="编辑正文" title="编辑正文">✎</button>' +
-        '<div id="bucket-content-view" class="detail-content">' + esc(b.content || '') + '</div>' +
+        '<div id="bucket-content-view" class="detail-content">' + esc(b.display_content || b.content || '') + '</div>' +
         '<form id="bucket-content-edit" class="content-edit-form hidden" onsubmit="submitBucketContentEdit(event, \'' + jsString(id) + '\')">' +
-          '<textarea name="content">' + esc(b.content || '') + '</textarea>' +
+          '<textarea name="content">' + esc(b.raw_content || b.content || '') + '</textarea>' +
           '<div class="content-edit-actions">' +
             '<button type="button" class="secondary" onclick="cancelBucketContentEdit()">取消</button>' +
             '<button type="submit">保存</button>' +
