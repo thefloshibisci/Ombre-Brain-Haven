@@ -1,38 +1,42 @@
-# ============================================================
-# Ombre Brain Docker Build
-# Docker 构建文件
-#
-# Build: docker build -t ombre-brain .
-# Run:   docker run -e OMBRE_API_KEY=your-key -p 8000:8000 ombre-brain
-# ============================================================
-
 FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
-# Install dependencies first (leverage Docker cache)
-# 先装依赖（利用 Docker 缓存）
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project files / 复制项目文件
+# Xinchao is bundled as an internal sidecar. Node 20 matches its supported runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY *.py .
 COPY resources ./resources
 COPY scripts ./scripts
 COPY dashboard.html .
 COPY dashboard_assets ./dashboard_assets
 COPY config.example.yaml ./config.yaml
+
+COPY xinchao/package.json ./xinchao/package.json
+COPY xinchao/configs ./xinchao/configs
+COPY xinchao/src ./xinchao/src
+
 RUN chmod +x scripts/*.sh
 
-# Persistent mount point: bucket data
-# 持久化挂载点：记忆数据
-VOLUME ["/app/buckets"]
+ENV OMBRE_TRANSPORT=streamable-http \
+    OMBRE_BUCKETS_DIR=/data \
+    OMBRE_STATE_DIR=/state \
+    OMBRE_PROXY_PORT=9000 \
+    OMBRE_GATEWAY_PORT=8010 \
+    OMBRE_XINCHAO_PORT=18110
 
-# Default to streamable-http for container (remote access)
-# 容器场景默认用 streamable-http
-ENV OMBRE_TRANSPORT=streamable-http
-ENV OMBRE_BUCKETS_DIR=/app/buckets
+VOLUME ["/data", "/state"]
+EXPOSE 9000
 
-EXPOSE 8000
-
-CMD ["python", "server.py"]
+CMD ["python", "entrypoint_zeabur.py"]
