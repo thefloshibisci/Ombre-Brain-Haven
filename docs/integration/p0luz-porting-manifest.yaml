@@ -201,7 +201,7 @@ batches:
   - id: B6
     name: metadata-tools-letters-and-boundaries
     disposition: MERGE_BEHAVIOR
-    status: pending
+    status: done
     sources:
       - src/tools
       - src/ombrebrain/domain
@@ -244,6 +244,8 @@ batches:
       haven_new:
         - tests/test_legacy_metadata_contract.py
         - tests/test_letter_contract.py
+        - tests/test_catalog_contract.py
+        - tests/test_test_data_contract.py
     acceptance:
       - existing Haven feel, plan, letter, archive and bucket files stay readable
       - no general-purpose hard deletion is introduced

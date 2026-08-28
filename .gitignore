@@ -5,6 +5,10 @@ tests/*
 !tests/test_grow_idempotency.py
 !tests/test_source_layer.py
 !tests/test_relation_bindings.py
+!tests/test_letter_contract.py
+!tests/test_legacy_metadata_contract.py
+!tests/test_catalog_contract.py
+!tests/test_test_data_contract.py
 *.pyc
 *.pyo
 .env

@@ -28,13 +28,14 @@
 import os
 import asyncio
 import hashlib
+import inspect
 import math
 import logging
 import re
 import shutil
 import json
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -83,6 +84,7 @@ class BucketManager:
         self.dynamic_dir = os.path.join(self.base_dir, "dynamic")
         self.archive_dir = os.path.join(self.base_dir, "archive")
         self.feel_dir = os.path.join(self.base_dir, "feel")
+        self.letter_dir = os.path.join(self.base_dir, "letters")
         self.tombstone_dir = os.path.join(self.base_dir, ".tombstones")
         self.media_store = MediaStore(
             self.base_dir,
@@ -162,6 +164,7 @@ class BucketManager:
         meaning: str | None = None,
         media=None,
         extra_metadata: dict | None = None,
+        test_data: bool = False,
     ) -> str:
         """
         Create a new memory bucket, return bucket ID.
@@ -221,6 +224,12 @@ class BucketManager:
             metadata["digested"] = True
         if source:
             metadata["source"] = source
+        if test_data:
+            metadata["provenance"] = {
+                "kind": "test",
+                "created_by": str(source or "developer")[:80],
+                "erasable": True,
+            }
         if extra_metadata:
             reserved = set(metadata.keys()) | {"content"}
             for key, value in extra_metadata.items():
@@ -230,7 +239,9 @@ class BucketManager:
 
         # --- Choose directory by type + primary domain ---
         # --- 按类型 + 主题域选择存储目录 ---
-        if bucket_type == "permanent" or pinned:
+        if bucket_type == "letter":
+            type_dir = self.letter_dir
+        elif bucket_type == "permanent" or pinned:
             type_dir = self.permanent_dir
             if pinned and bucket_type != "permanent":
                 metadata["type"] = "permanent"
@@ -238,7 +249,9 @@ class BucketManager:
             type_dir = self.feel_dir
         else:
             type_dir = self.dynamic_dir
-        if bucket_type == "feel":
+        if bucket_type == "letter":
+            primary_domain = "history"
+        elif bucket_type == "feel":
             primary_domain = "沉淀物"  # feel subfolder name
         else:
             primary_domain = sanitize_name(domain[0]) if domain else "未分类"
@@ -313,7 +326,10 @@ class BucketManager:
                     exc,
                 )
                 return None
-            changed, result = mutation(post)
+            mutation_result = mutation(post)
+            if inspect.isawaitable(mutation_result):
+                mutation_result = await mutation_result
+            changed, result = mutation_result
             if changed:
                 atomic_write_text(file_path, frontmatter.dumps(post))
             return result
@@ -451,7 +467,47 @@ class BucketManager:
                     exc,
                 )
                 return None
-            changed, result = mutation(post)
+            mutation_result = mutation(post)
+            if inspect.isawaitable(mutation_result):
+                mutation_result = await mutation_result
+            changed, result = mutation_result
+            if changed:
+                atomic_write_text(file_path, frontmatter.dumps(post))
+            return result
+
+    async def mutate_lock_fields(self, bucket_id: str, mutation) -> Any:
+        """Atomically change Letter lock fields only, including archived buckets.
+
+        The mutation receives the loaded frontmatter post and returns
+        ``(changed, result)``.  This bypasses normal update() lifecycle and
+        derived indexing because the lock state must not refresh recency or
+        rebuild recall indexes.
+        """
+        normalized_id = str(bucket_id or "").strip()
+        if not normalized_id:
+            return None
+        lock = self._derived_index_locks.get(normalized_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._derived_index_locks[normalized_id] = lock
+        async with lock:
+            file_path = self._find_bucket_file(normalized_id)
+            if not file_path:
+                return None
+            try:
+                post = frontmatter.load(file_path)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load bucket for lock update / 加载桶锁状态失败: "
+                    "%s: %s",
+                    file_path,
+                    exc,
+                )
+                return None
+            mutation_result = mutation(post)
+            if inspect.isawaitable(mutation_result):
+                mutation_result = await mutation_result
+            changed, result = mutation_result
             if changed:
                 atomic_write_text(file_path, frontmatter.dumps(post))
             return result
@@ -1135,6 +1191,73 @@ class BucketManager:
 
         logger.info(f"Deleted bucket / 删除记忆桶: {bucket_id}")
         return True
+
+    async def hard_delete_test_bucket(self, bucket_id: str, *, reason: str = "") -> dict:
+        """Physically erase only a bucket created as erasable test data."""
+        file_path = self._find_bucket_file(bucket_id)
+        if not file_path:
+            return {"ok": False, "error": "not_found"}
+
+        try:
+            post = frontmatter.load(file_path)
+        except Exception as e:
+            logger.warning(
+                "Failed to load bucket for test erase / 加载测试桶失败: %s: %s",
+                file_path,
+                e,
+            )
+            return {"ok": False, "error": "read_failed"}
+
+        provenance = post.get("provenance")
+        if not (
+            isinstance(provenance, dict)
+            and provenance.get("kind") == "test"
+            and provenance.get("erasable") is True
+        ):
+            return {"ok": False, "error": "not_erasable_test_data"}
+
+        normalized_reason = str(reason or "").strip()
+        if not normalized_reason:
+            return {"ok": False, "error": "missing_delete_reason"}
+        if len(normalized_reason) > 500:
+            return {"ok": False, "error": "delete_reason_too_long"}
+
+        try:
+            tombstone = self._build_tombstone(bucket_id, file_path)
+            tombstone["provenance"] = dict(provenance)
+            tombstone["delete_reason"] = normalized_reason
+            os.remove(file_path)
+            self._write_tombstone(tombstone)
+            self.media_store.cleanup(bucket_id, [])
+        except OSError as e:
+            logger.error(
+                "Failed to erase test bucket / 删除测试桶失败: %s: %s",
+                file_path,
+                e,
+            )
+            return {"ok": False, "error": "delete_failed"}
+
+        if self.embedding_outbox is not None:
+            try:
+                self.embedding_outbox.discard(bucket_id)
+            except Exception as exc:
+                logger.warning(
+                    "discard embedding outbox failed for %s: %s",
+                    bucket_id,
+                    exc,
+                )
+        if self.embedding_engine is not None:
+            try:
+                self.embedding_engine.delete_embedding(bucket_id)
+            except Exception as exc:
+                logger.warning(
+                    "delete embedding failed for %s: %s",
+                    bucket_id,
+                    exc,
+                )
+
+        logger.warning("Physically erased test bucket: %s", bucket_id)
+        return {"ok": True, "deleted": bucket_id}
 
     def _build_tombstone(self, bucket_id: str, file_path: str) -> dict:
         deleted_at = now_iso()
@@ -1830,7 +1953,7 @@ class BucketManager:
         """
         buckets = []
 
-        dirs = [self.permanent_dir, self.dynamic_dir, self.feel_dir]
+        dirs = [self.permanent_dir, self.dynamic_dir, self.feel_dir, self.letter_dir]
         if include_archive:
             dirs.append(self.archive_dir)
 
@@ -1871,6 +1994,7 @@ class BucketManager:
             (self.dynamic_dir, "dynamic_count"),
             (self.archive_dir, "archive_count"),
             (self.feel_dir, "feel_count"),
+            (self.letter_dir, "letter_count"),
         ]:
             if not os.path.exists(subdir):
                 continue
@@ -1985,7 +2109,13 @@ class BucketManager:
         """
         if not bucket_id:
             return None
-        for dir_path in [self.permanent_dir, self.dynamic_dir, self.archive_dir, self.feel_dir]:
+        for dir_path in [
+            self.permanent_dir,
+            self.dynamic_dir,
+            self.archive_dir,
+            self.feel_dir,
+            self.letter_dir,
+        ]:
             if not os.path.exists(dir_path):
                 continue
             for root, _, files in os.walk(dir_path):
@@ -2013,7 +2143,7 @@ class BucketManager:
             post = frontmatter.load(file_path)
             return {
                 "id": post.get("id", Path(file_path).stem),
-                "metadata": dict(post.metadata),
+                "metadata": _normalize_frontmatter_metadata(post.metadata),
                 "content": post.content,
                 "path": file_path,
                 "content_start_line": _markdown_body_start_line(raw),
@@ -2036,3 +2166,25 @@ def _markdown_body_start_line(text: str) -> int:
                 body_start += 1
             return max(1, body_start)
     return 1
+
+
+def _normalize_frontmatter_metadata(value: Any) -> Any:
+    """Normalize legacy YAML values to JSON-safe metadata.
+
+    python-frontmatter parses unquoted ISO datetimes as Python datetime/date
+    objects. Older bucket files may contain them, and callers frequently turn
+    metadata into JSON; convert these leaf values back to ISO strings while
+    preserving all other legacy metadata as-is.
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_frontmatter_metadata(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_normalize_frontmatter_metadata(item) for item in value]
+    return value

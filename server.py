@@ -68,6 +68,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mcp.server.fastmcp import Context, FastMCP
 
 from bucket_manager import BucketManager
+from catalog import surface_catalog
 from dehydrator import Dehydrator
 from decay_engine import DecayEngine
 from errors import llm_step_failed_error
@@ -80,6 +81,10 @@ from gateway_state import GatewayStateStore
 from identity import identity_names
 from identity_semantics import IdentitySemanticStore
 from import_memory import ImportEngine
+from letter_lock import is_letter_bucket, letter_lock_state
+from letter_service import letter_lock_update as _letter_lock_update_service
+from letter_service import letter_read as _letter_read_service
+from letter_service import letter_write as _letter_write_service
 from memory_diffusion import (
     diffuse_memory,
     diffusion_options_from_config,
@@ -4203,6 +4208,8 @@ async def _merge_or_create(
     date: str = "",
     meaning: str = "",
     media=None,
+    source_tool: str = "",
+    test_data: bool = False,
 ) -> tuple[str, str, bool, dict | None]:
     """
     Check if a similar bucket exists for merging; merge if so, create if not.
@@ -4228,11 +4235,14 @@ async def _merge_or_create(
         bucket = existing[0]
         # --- Never merge into pinned/protected buckets ---
         # --- 不合并到钉选/保护桶 ---
-        if not (
-            bucket["metadata"].get("pinned")
-            or bucket["metadata"].get("protected")
-            or bucket["metadata"].get("type") == "feel"
-            or _is_profile_fact_bucket(bucket)
+        if (
+            not test_data
+            and not (
+                bucket["metadata"].get("pinned")
+                or bucket["metadata"].get("protected")
+                or bucket["metadata"].get("type") == "feel"
+                or _is_profile_fact_bucket(bucket)
+            )
         ):
             try:
                 merged = await dehydrator.merge(bucket["content"], content)
@@ -4268,6 +4278,8 @@ async def _merge_or_create(
         date=date or None,
         meaning=meaning,
         media=media,
+        source=source_tool or None,
+        test_data=test_data,
         extra_metadata=_memory_classification_metadata(
             memory_subject,
             memory_layer,
@@ -4732,6 +4744,9 @@ async def _format_direct_bucket(
     query_text: str = "",
     direct_render_mode: str = "auto",
 ) -> str:
+    if is_letter_bucket(bucket) and bool(letter_lock_state(bucket, caller_side="ai").get("locked")):
+        header = _direct_bucket_header(bucket, moment)
+        return f"{header} letter_locked\n一封上锁的信。请通过 letter_read 读取。"
     original = _rendered_bucket_content(bucket)
     header = _direct_bucket_header(bucket, moment)
     if _is_source_record_synthetic_moment(moment):
@@ -5059,6 +5074,13 @@ def _breath_word_map_only_without_topic(query: str, moment: dict, seed_diagnosti
 
 
 def _bucket_relevance_node(bucket: dict, score: float = 0.0) -> dict:
+    if is_letter_bucket(bucket) and bool(letter_lock_state(bucket, caller_side="ai").get("locked")):
+        return {
+            "id": bucket.get("id"),
+            "text": "",
+            "score": score,
+            "metadata": {"bucket_name": "一封上锁的信"},
+        }
     meta = bucket.get("metadata", {}) if isinstance(bucket.get("metadata"), dict) else {}
     return {
         "id": bucket.get("id"),
@@ -7282,6 +7304,7 @@ async def breath(
     retrieval_mode: str = "graph",
     mode: str = "",
     session_id: str = "",
+    catalog: bool = False,
 ) -> str:
     """只读检索记忆。查主题用 query；新窗口轻交接用 mode="handoff"；date 或 query 里的日期可查当天普通记忆；domain="feel"/"whisper" 读私密通道，domain="daily_impression" 才读日印象。日期支持 2026-06-15、2026.06.15、2026年6月15日、25年6月15日、6月15日。"""
     await decay_engine.ensure_started()
@@ -7309,6 +7332,13 @@ async def breath(
     if date_hint and (raw_date or _breath_query_requests_date_read(query)):
         date_key = date_hint["date"]
         date_label = date_hint.get("label", date_key)
+
+    if catalog:
+        return await surface_catalog(
+            bucket_mgr,
+            domain_filter=[item.strip() for item in domain.split(",") if item.strip()] or None,
+            max_results=max_results,
+        )
 
     if not mode_key and is_session_start and not str(query or "").strip() and not domain_key:
         mode_key = "handoff"
@@ -7588,6 +7618,10 @@ async def breath(
     except Exception as e:
         logger.error(f"Search failed / 检索失败: {e}")
         return "检索过程出错，请稍后重试。"
+    matches = [
+        bucket for bucket in matches
+        if not (is_letter_bucket(bucket) and letter_lock_state(bucket, caller_side="ai").get("locked"))
+    ]
     matches = _breath_recall_seed_buckets(matches)
 
     seed_diagnostics: dict[str, dict] = {}
@@ -7614,7 +7648,11 @@ async def breath(
             if bucket_id not in matched_ids and sim_score >= recall_thresholds["vector_min_score"]:
                 bucket = await bucket_mgr.get(bucket_id)
                 if bucket:
-                    if bucket.get("metadata", {}).get("type") == "feel" or is_self_anchor_bucket(bucket):
+                    if (
+                        bucket.get("metadata", {}).get("type") == "feel"
+                        or is_self_anchor_bucket(bucket)
+                        or (is_letter_bucket(bucket) and letter_lock_state(bucket, caller_side="ai").get("locked"))
+                    ):
                         continue
                     bucket["score"] = round(sim_score * 100, 2)
                     bucket["vector_match"] = True
@@ -7635,6 +7673,15 @@ async def breath(
     except Exception as e:
         logger.warning(f"Failed to list buckets for moment recall / moment 召回列桶失败: {e}")
         all_buckets = matches
+
+    matches = [
+        bucket for bucket in matches
+        if not (is_letter_bucket(bucket) and letter_lock_state(bucket, caller_side="ai").get("locked"))
+    ]
+    all_buckets = [
+        bucket for bucket in all_buckets
+        if not (is_letter_bucket(bucket) and letter_lock_state(bucket, caller_side="ai").get("locked"))
+    ]
 
     lexical_terms = _append_breath_lexical_matches(
         query=query,
@@ -8429,6 +8476,7 @@ async def hold(
     domain: str = "",
     meaning: str = "",
     media: list | dict | str | None = None,
+    test_data: bool = False,
 ) -> str:
     """写一条长期记忆。单个事实/承诺/偏好用 hold；旧记忆的新感受用 comment_bucket；悄悄话用 whisper=True。date 可传事件日期；title 可选，传了就用给定标题，不传则自动生成。普通记忆不用填写 domain，系统会自动判断；维护自我锚点等特殊桶时可显式传 domain。显式 valence/arousal 会覆盖自动情绪。普通记忆 content 的最小写入就是正文；只有确实需要结构化时才按需使用 ### moment、### original、### reflection；reflection 必须写成“我……”第一人称。不要写 ### affect_anchor、### followup 或 ### todo：长期回应变化写进 reflection，到时提醒用 reminder_create。feel=True/whisper=True 时 content 只能写第一人称正文，不写标题或任何 Markdown 分段。meaning 是可选的第一人称“为什么值得被想起”，只存元数据，不参与普通正文召回。media 可传公开图片 URL、服务器路径、含 url/path/data_base64/filename/title/note 的对象，或这些对象的列表；OB 会下载并永久保存，优先传 URL 以免长 Base64 占用上下文。"""
     await decay_engine.ensure_started()
@@ -8440,6 +8488,9 @@ async def hold(
     contract_error = _memory_write_contract_error(content, feel_only=bool(feel or whisper))
     if contract_error:
         return f"写入被拒绝：{contract_error}"
+
+    if test_data and (pinned or feel or whisper):
+        return "测试数据不能创建为 pinned 或 feel。"
 
     importance = max(1, min(10, importance))
     extra_tags = [t.strip() for t in tags.split(",") if t.strip()]
@@ -8465,6 +8516,8 @@ async def hold(
                 date=event_date or None,
                 meaning=meaning,
                 media=media,
+                source="hold" if test_data else None,
+                test_data=test_data,
             )
         except MediaPersistenceError as exc:
             return f"媒体保存失败：{exc}"
@@ -8560,6 +8613,8 @@ async def hold(
                 date=event_date or None,
                 meaning=meaning,
                 media=media,
+                source="hold" if test_data else None,
+                test_data=test_data,
                 extra_metadata=_memory_classification_metadata(
                     classification["memory_subject"],
                     classification["memory_layer"],
@@ -8590,6 +8645,8 @@ async def hold(
             date=event_date,
             meaning=meaning,
             media=media,
+            source="hold" if test_data else None,
+            test_data=test_data,
         )
     except MediaPersistenceError as exc:
         return f"媒体保存失败：{exc}"
@@ -8708,7 +8765,7 @@ def _looks_like_operit_auto_grow_content(content: str) -> bool:
     return bool(re.match(r"^【\d{4}-\d{2}-\d{2} \d{2}:\d{2}】\s*\n", str(content or "")))
 
 
-async def _grow_direct_structured_content(content: str, title: str = "", gate_prefix: str = "") -> str:
+async def _grow_direct_structured_content(content: str, title: str = "", gate_prefix: str = "", test_data: bool = False) -> str:
     contract_error = _memory_write_contract_error(content)
     if contract_error:
         return f"{gate_prefix}写入被拒绝：{contract_error}"
@@ -8750,11 +8807,13 @@ async def _grow_direct_structured_content(content: str, title: str = "", gate_pr
         valence=analysis.get("valence", 0.5),
         arousal=analysis.get("arousal", 0.3),
         name=name or None,
+        source="grow" if test_data else None,
         extra_metadata=_memory_classification_metadata(
             classification["memory_subject"],
             classification["memory_layer"],
             classification["memory_classification_source"],
         ),
+        test_data=test_data,
     )
     _queue_embedding_refresh(bucket_id)
     _queue_memory_enrichment(bucket_id)
@@ -8788,7 +8847,7 @@ async def grow(content: str, auto: bool = False, source: str = "", title: str = 
         gate_prefix = f"{_format_write_gate_result(gate_decision)}\n" if gate_decision else ""
         content_value = str(content or "").strip()
         if _is_grow_direct_content(content_value):
-            return await _grow_direct_structured_content(content_value, title=title, gate_prefix=gate_prefix)
+            return await _grow_direct_structured_content(content_value, title=title, gate_prefix=gate_prefix, test_data=test_data)
 
         content_value = _normalize_memory_sections_for_write(content_value)
 
@@ -8833,6 +8892,8 @@ async def grow(content: str, auto: bool = False, source: str = "", title: str = 
                 memory_subject=fast_classification["memory_subject"],
                 memory_layer=fast_classification["memory_layer"],
                 memory_classification_source=fast_classification["memory_classification_source"],
+                source_tool="grow" if test_data else "",
+                test_data=test_data,
             )
             _queue_memory_enrichment(bucket_id)
             action = "合并" if is_merged else "新建"
@@ -8891,6 +8952,8 @@ async def grow(content: str, auto: bool = False, source: str = "", title: str = 
                     memory_subject=item_classification["memory_subject"],
                     memory_layer=item_classification["memory_layer"],
                     memory_classification_source=item_classification["memory_classification_source"],
+                    source_tool="grow" if test_data else "",
+                    test_data=test_data,
                 )
                 _queue_memory_enrichment(bucket_id)
 
@@ -8911,67 +8974,6 @@ async def grow(content: str, auto: bool = False, source: str = "", title: str = 
 
     fingerprint = request_fingerprint(content=content, items=None, test_data=test_data)
     return await run_once(fingerprint, execute_grow)
-
-    if not items:
-        return f"{gate_prefix}内容为空或整理失败。"
-
-    results = []
-    created = 0
-    merged = 0
-
-    # --- Step 2: create each item (with per-item error handling) ---
-    # --- 逐条新建（单条失败不影响其他）；grow 不自动揉写旧桶 ---
-    for item in items:
-        try:
-            item_tags = item.get("tags", [])
-            item_content = _normalize_memory_sections_for_write(item.get("content", ""))
-            contract_error = _memory_write_contract_error(item_content)
-            if contract_error:
-                results.append(f"⚠️{item.get('name', '未命名')}: {contract_error}")
-                continue
-            item_content = await _auto_generate_write_moment_if_needed(
-                item_content,
-                item_tags,
-                domain=item.get("domain", ["general"]),
-            )
-            item_classification = normalize_write_classification(
-                memory_subject=item.get("memory_subject", ""),
-                memory_layer=item.get("memory_layer", ""),
-                tags=item_tags,
-                content=item_content,
-            )
-            if _has_favorite_tag(item_tags) and not _has_favorite_reason(item_content):
-                results.append("⚠️favorite 缺少 reflection")
-                continue
-            bucket_id, result_name, is_merged, related_bucket = await _merge_or_create(
-                content=item_content,
-                tags=item_tags,
-                importance=item.get("importance", 5),
-                domain=item.get("domain", ["general"]),
-                valence=item.get("valence", 0.5),
-                arousal=item.get("arousal", 0.3),
-                name=item.get("name", ""),
-                allow_merge=False,
-                memory_subject=item_classification["memory_subject"],
-                memory_layer=item_classification["memory_layer"],
-                memory_classification_source=item_classification["memory_classification_source"],
-            )
-            _queue_memory_enrichment(bucket_id)
-
-            if is_merged:
-                results.append(f"📎{result_name}")
-                merged += 1
-            else:
-                results.append(f"📝{item.get('name', result_name)}")
-                created += 1
-        except Exception as e:
-            logger.warning(
-                f"Failed to process diary item / 日记条目处理失败: "
-                f"{item.get('name', '?')}: {e}"
-            )
-            results.append(f"⚠️{item.get('name', '?')}")
-
-    return f"{gate_prefix}{len(items)}条|新{created}合{merged}\n" + "\n".join(results)
 
 
 # =============================================================
@@ -9161,6 +9163,67 @@ def _profile_fact_name(fact: str) -> str:
 # 同时承接删除功能
 # =============================================================
 @mcp.tool()
+async def letter_write(
+    author: str,
+    content: str,
+    user_name: str = "",
+    title: str = "",
+    date: str = "",
+    ai_name: str = "",
+    lock_type: str = "none",
+    unlock_date: str = "",
+) -> str:
+    """写入一封信。author 必填："user"=用户一方写的，"ai"（或等于 ai_name）=AI 一方写的，也可直接传任意署名字符串；title/date 可选。带锁信只能由 AI 可信入口创建，用户代存信必须 lock_type="none"。信件原文永久保存，不压缩、不合并、不衰减；普通 breath 不返回，请用 letter_read。"""
+    return await _letter_write_service(
+        bucket_mgr,
+        author=author,
+        content=content,
+        user_name=user_name,
+        title=title,
+        date=date,
+        ai_name=ai_name,
+        lock_type=lock_type,
+        unlock_date=unlock_date,
+    )
+
+
+@mcp.tool()
+async def letter_lock_update(
+    letter_id: str,
+    lock_type: str,
+    unlock_date: str = "",
+) -> str:
+    """只修改既有 Letter 的锁元数据。仅锁拥有者可操作；不编辑标题、正文、署名或创建时间。"""
+    return await _letter_lock_update_service(
+        bucket_mgr,
+        letter_id=letter_id,
+        lock_type=lock_type,
+        unlock_date=unlock_date,
+        caller_side="ai",
+    )
+
+
+@mcp.tool()
+async def letter_read(
+    query: str = "",
+    limit: int = 10,
+    author: str = "",
+    date_from: str = "",
+    date_to: str = "",
+) -> str:
+    """检索历史信件。author 按署名过滤（"user"=用户侧，"ai"=AI 侧，也可传具体署名字符串）；date_from/date_to=ISO 日期范围。无 query 时按时间倒序返回最近 limit 封。返回完整原文，不压缩。"""
+    return await _letter_read_service(
+        bucket_mgr,
+        query=query,
+        limit=limit,
+        author=author,
+        date_from=date_from,
+        date_to=date_to,
+        caller_side="ai",
+    )
+
+
+@mcp.tool()
 async def trace(
     bucket_id: str,
     name: str = "",
@@ -9180,14 +9243,19 @@ async def trace(
     media_append: list | dict | str | None = None,
     media_replace: list | dict | str | None = None,
     delete: bool = False,
+    hard_delete: bool = False,
+    delete_reason: str = "",
 ) -> str:
-    """修改已有记忆，不创建新桶。tags/domain/content 是替换；date 可改事件日期；改前先 read_bucket。resolved/digested 让旧事沉底。只改元数据/date 不重建 embedding，改 content/name 才重建。"""
+    """修改已有记忆，不创建新桶。tags/domain/content 是替换；date 可改事件日期；改前先 read_bucket。resolved/digested 让旧事沉底。只改元数据/date 不重建 embedding，改 content/name 才重建。hard_delete=True 仅清理创建时明确标记 test_data=True 的测试桶，必须提供非空 delete_reason（不超过 500 字）。"""
 
     bucket_id = _coerce_memory_id(bucket_id)
     if not bucket_id:
         return "请提供有效的 bucket_id。"
 
     # --- Delete mode / 删除模式 ---
+    if delete and hard_delete:
+        return "参数冲突：delete=True 表示归档，hard_delete=True 仅表示清理测试桶，两者不能同时使用。"
+
     if delete:
         result = await _delete_bucket_and_indexes(bucket_id)
         return (
@@ -9195,6 +9263,24 @@ async def trace(
             if result.get("status") == "deleted"
             else f"未找到记忆桶: {bucket_id}"
         )
+
+    if hard_delete:
+        normalized_reason = str(delete_reason or "").strip()
+        if not normalized_reason:
+            return "必须提供非空 delete_reason 才能清理测试桶。"
+        if len(normalized_reason) > 500:
+            return "delete_reason 不能超过 500 个字符。"
+        result = await bucket_mgr.hard_delete_test_bucket(bucket_id, reason=normalized_reason)
+        if result.get("ok"):
+            cleanup, errors = _delete_bucket_indexes(bucket_id)
+            return f"已永久删除测试桶: {bucket_id}" + (f"（索引清理错误: {','.join(errors)}）" if errors else "")
+        if result.get("error") == "not_found":
+            return f"未找到记忆桶: {bucket_id}"
+        if result.get("error") == "not_erasable_test_data":
+            return "拒绝永久删除：hard_delete 仅用于创建时明确标记为 test_data 的测试桶，本次未删除、未归档。"
+        if result.get("error") == "delete_reason_too_long":
+            return "delete_reason 不能超过 500 个字符。"
+        return "测试桶清理失败，本次未删除、未归档。"
 
     bucket = await bucket_mgr.get(bucket_id)
     if not bucket:
