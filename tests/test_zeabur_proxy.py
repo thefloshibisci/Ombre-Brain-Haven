@@ -71,6 +71,48 @@ async def test_proxy_routes_and_preserves_gateway_prefix(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_proxy_maps_public_gateway_health_alias(monkeypatch):
+    requests = []
+
+    class FakeAsyncClient:
+        def __init__(self, base_url, timeout=None):
+            pass
+
+        def build_request(self, method, url, headers=None, content=None):
+            requests.append(url.path)
+            return object()
+
+        async def send(self, request, stream=True):
+            return FakeResponse()
+
+        async def aclose(self):
+            return None
+
+    class FakeResponse:
+        def __init__(self):
+            self.status_code = 200
+            self.headers = httpx.Headers({"content-type": "application/json"})
+
+        async def aread(self):
+            return b'{"status":"ok"}'
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(proxy_server, "httpx", type("httpx", (), {"AsyncClient": FakeAsyncClient, "URL": httpx.URL, "InvalidURL": httpx.InvalidURL, "Headers": httpx.Headers}))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=proxy_server.app),
+        base_url="http://proxy.test",
+    ) as client:
+        response = await client.get("/v1/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert requests == ["/health"]
+
+
+@pytest.mark.asyncio
 async def test_proxy_streams_event_responses(monkeypatch):
     class FakeAsyncClient:
         def __init__(self, base_url, timeout=None):

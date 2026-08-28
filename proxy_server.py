@@ -31,7 +31,8 @@ def _target_for_path(path: str) -> tuple[str, str]:
         target = os.environ.get("OMBRE_XINCHAO_URL", DEFAULT_TARGETS["xinchao"])
         return target, path[len("/xinchao"):] or "/"
     if path == "/v1" or path.startswith("/v1/"):
-        return os.environ.get("OMBRE_GATEWAY_URL", DEFAULT_TARGETS["gateway"]), path
+        gateway_path = "/health" if path.rstrip("/") == "/v1/health" else path
+        return os.environ.get("OMBRE_GATEWAY_URL", DEFAULT_TARGETS["gateway"]), gateway_path
     return os.environ.get("OMBRE_BRAIN_URL", DEFAULT_TARGETS["brain"]), path
 
 
