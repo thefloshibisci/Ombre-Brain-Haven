@@ -15,6 +15,7 @@ tests/*
 !tests/test_migrate_supabase_archive.py
 !tests/test_zeabur_proxy.py
 !tests/test_env_loader.py
+!tests/test_gateway_call_signatures.py
 *.pyc
 *.pyo
 .env

@@ -3389,6 +3389,7 @@ class GatewayService:
                 conflict_nudge_debug=conflict_nudge_debug,
                 just_now_context=just_now_context,
                 just_now_context_debug=just_now_context_debug,
+                xinchao_context=xinchao_context_text,
                 recent_context=recent_context,
                 recent_context_reason=recent_context_reason,
                 favorite_ids=favorite_ids,
