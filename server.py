@@ -66,6 +66,13 @@ import httpx
 # --- 确保同目录下的模块能被正确导入 ---
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Keys saved from the dashboard live in a file, not the platform env.
+# Load them before any module reads os.environ at import time.
+# 面板保存的密钥存在文件里而非平台环境变量，需在其他模块导入期读取 os.environ 之前加载。
+from env_loader import load_env_file, ombre_env_path  # noqa: E402
+
+load_env_file()
+
 from mcp.server.fastmcp import Context, FastMCP
 
 from bucket_manager import BucketManager
@@ -230,10 +237,7 @@ def _split_csv(value: str | None) -> list[str]:
 
 
 def _dashboard_env_path() -> str:
-    return os.environ.get(
-        "OMBRE_ENV_PATH",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
-    )
+    return ombre_env_path()
 
 
 def _quote_env_value(value: str) -> str:
@@ -273,6 +277,12 @@ def _write_dashboard_env_values(updates: dict[str, str]) -> list[str]:
 
     with open(env_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(output).rstrip() + "\n")
+    # The state volume is world-writable, so keep the secret file owner-only.
+    # 状态卷对所有人可写，密钥文件需限制为仅所有者可读写。
+    try:
+        os.chmod(env_path, 0o600)
+    except OSError:
+        pass
 
     for key, value in updates.items():
         os.environ[key] = value

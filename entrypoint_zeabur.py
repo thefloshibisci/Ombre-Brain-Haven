@@ -9,6 +9,8 @@ import sys
 import time
 import yaml
 
+from env_loader import load_env_file, ombre_env_path
+
 
 SHUTDOWN_GRACE_SECONDS = 10
 
@@ -65,10 +67,26 @@ def build_child_env(role: str) -> dict[str, str]:
 
 
 def main() -> int:
+    # Load dashboard-saved keys before any sidecar env is snapshotted.
+    # 在快照子进程环境之前加载面板保存的密钥。
+    loaded = load_env_file()
+    if loaded:
+        print(
+            "[entrypoint] loaded %d vars from %s: %s"
+            % (len(loaded), ombre_env_path(), ", ".join(loaded)),
+            flush=True,
+        )
     if "OMBRE_PROXY_PORT" not in os.environ:
         os.environ["OMBRE_PROXY_PORT"] = os.environ.get("PORT", "9000")
     os.environ.setdefault("OMBRE_GATEWAY_PORT", "8010")
     os.environ.setdefault("OMBRE_XINCHAO_PORT", "18110")
+    # Without this the dashboard cannot push saved config to the gateway
+    # process, so gateway keys stay stale until a full restart.
+    # 缺少此项时面板无法把配置热推给 gateway 进程，密钥要等重启才生效。
+    os.environ.setdefault(
+        "OMBRE_GATEWAY_ADMIN_URL",
+        "http://127.0.0.1:%s/api/config" % os.environ["OMBRE_GATEWAY_PORT"],
+    )
     os.environ.setdefault("OMBRE_TRANSPORT", "streamable-http")
     os.environ.setdefault("OMBRE_BUCKETS_DIR", "/data")
     os.environ.setdefault("STATE_PATH", "/state/xinchao-state.json")

@@ -22,6 +22,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+# Gateway runs as its own process, so it must load the dashboard-saved
+# keys itself; the parent's os.environ mutations never reach it.
+# Gateway 是独立进程，必须自行加载面板保存的密钥。
+from env_loader import load_env_file
+
+load_env_file()
+
 from bucket_manager import BucketManager
 from dehydrator import Dehydrator
 from dream_engine import DreamEngine

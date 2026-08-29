@@ -14,6 +14,7 @@ tests/*
 !tests/test_mcp_schema_contract.py
 !tests/test_migrate_supabase_archive.py
 !tests/test_zeabur_proxy.py
+!tests/test_env_loader.py
 *.pyc
 *.pyo
 .env
