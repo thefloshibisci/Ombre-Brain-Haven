@@ -841,7 +841,7 @@ class GatewayService:
 
     def _build_xinchao_adapter(self, raw_config: dict[str, Any], *, db_path: str) -> XinchaoAdapter:
         try:
-            return XinchaoAdapter(raw_config, db_path=db_path, http_client=self.http_client)
+            return XinchaoAdapter({"xinchao_adapter": raw_config}, db_path=db_path, http_client=self.http_client)
         except Exception as exc:
             logger.warning("Xinchao adapter disabled after init failure: %s", safe_error_detail(exc))
             return XinchaoAdapter(

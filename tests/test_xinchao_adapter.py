@@ -5,6 +5,7 @@ import os
 import httpx
 import pytest
 
+from gateway import GatewayService
 from xinchao_adapter import XinchaoAdapter, XinchaoContext
 
 
@@ -72,6 +73,19 @@ def test_disabled_adapter_is_inert(tmp_path):
     assert adapter.enabled is False
     assert adapter.base_url == ""
     assert adapter.outbox is None
+
+
+def test_gateway_builds_enabled_adapter_from_nested_gateway_config(tmp_path):
+    service = GatewayService.__new__(GatewayService)
+    service.http_client = None
+
+    adapter = service._build_xinchao_adapter(
+        adapter_config()["xinchao_adapter"],
+        db_path=str(tmp_path / "gateway_state.db"),
+    )
+
+    assert adapter.enabled is True
+    assert adapter.base_url == "http://127.0.0.1:8787"
 
 
 def test_session_mapping_is_deterministic_and_compatible(tmp_path):
