@@ -17,6 +17,10 @@ tests/*
 !tests/test_env_loader.py
 !tests/test_gateway_call_signatures.py
 !tests/test_review_summary_queue.py
+!tests/test_rebuild_summary_evidence_windows.py
+!tests/test_review_queue_duplicate_gate.py
+!tests/test_audit_raw_event_duplicates.py
+!tests/test_prepare_summary_review_queue.py
 *.pyc
 *.pyo
 .env
