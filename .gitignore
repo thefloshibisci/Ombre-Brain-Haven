@@ -16,6 +16,7 @@ tests/*
 !tests/test_zeabur_proxy.py
 !tests/test_env_loader.py
 !tests/test_gateway_call_signatures.py
+!tests/test_review_summary_queue.py
 *.pyc
 *.pyo
 .env
