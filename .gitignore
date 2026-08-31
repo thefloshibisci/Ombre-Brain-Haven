@@ -21,6 +21,7 @@ tests/*
 !tests/test_review_queue_duplicate_gate.py
 !tests/test_audit_raw_event_duplicates.py
 !tests/test_prepare_summary_review_queue.py
+!tests/test_import_summary_memories.py
 *.pyc
 *.pyo
 .env
