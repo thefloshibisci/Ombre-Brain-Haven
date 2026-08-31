@@ -2,8 +2,7 @@ import asyncio
 import base64
 from types import SimpleNamespace
 
-from bucket_manager import BucketManager
-import server
+from haven_imports import BucketManager, server
 
 
 def run(awaitable):

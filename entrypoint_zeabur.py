@@ -115,7 +115,9 @@ def main() -> int:
 
     commands = [
         ("proxy", [sys.executable, "proxy_server.py"]),
-        ("brain", [sys.executable, "server.py"]),
+        # Brain itself must run the current upstream src/ runtime.
+        # The old root server would silently keep Haven on the ancient OB architecture.
+        ("brain", [sys.executable, "src/server.py"]),
         ("gateway", [sys.executable, "gateway.py"]),
         ("xinchao", ["node", "xinchao/src/server.js"]),
     ]

@@ -811,12 +811,49 @@ matching:
   fuzzy_threshold: 50             # Minimum match score (0-100) / 最低匹配分数
   max_results: 5                  # Max results per search / 单次搜索最多返回条数
 
-# --- Obsidian wikilinks / Obsidian 双链自动注入 ---
-wikilink:
-  enabled: true
-  use_tags: false
-  use_domain: true
-  use_auto_keywords: true
-  auto_top_k: 4
-  min_keyword_len: 3
-  exclude_keywords: []
+# Obsidian wikilink injection is deprecated and no longer configured here.
+# --- Current upstream runtime/security defaults / 当前主线运行与安全默认值 ---
+deployment:
+  public_url: ""
+ai_name: ""
+timezone: "Asia/Shanghai"
+mcp_require_auth: true
+mcp_auth_mode: "oauth"
+mcp_token: ""
+hooks:
+  token: ""
+  allow_public: false
+storage:
+  external_change_poll_seconds: 1.0
+surfacing:
+  breath_max_results: 20
+  breath_max_tokens: 10000
+  feel_max_tokens: 15000
+  recent_slots: 3
+  sampling:
+    enabled: false
+    top_k: 5
+    sample_k: 2
+    temperature: 0.7
+limits:
+  max_bucket_bytes: 51200
+  max_import_upload_bytes: 67108864
+  max_mcp_request_bytes: 4194304
+  max_management_request_bytes: 4194304
+  max_grow_input_bytes: 2097152
+  max_query_bytes: 16384
+  max_metadata_bytes: 16384
+  max_grow_items: 100
+  max_pinned: 20
+  max_protected: 20
+them:
+  max_tokens_per_person: 1500
+attribution:
+  self_names: []
+  user_names: []
+bucket_type_defaults:
+  letter:
+    weight: 1.0
+    dont_surface: false
+  plan:
+    weight: 0.5

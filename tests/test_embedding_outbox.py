@@ -11,7 +11,10 @@ import pytest
 
 from bucket_manager import BucketManager
 from embedding_engine import EmbeddingEngine
-from embedding_outbox import EmbeddingOutbox, content_hash
+from ombrebrain.storage.embedding_outbox import EmbeddingOutbox, content_hash
+from tools import _common as common
+from tools import _runtime as rt
+from web import embedding as embedding_web
 
 
 def _config(tmp_path, **embedding):
@@ -111,8 +114,7 @@ class ObservableEngine(RecordingEngine):
 async def test_stale_empty_reconcile_keeps_new_pending_item(tmp_path):
     config = _config(tmp_path)
     engine = RecordingEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
 
     assert outbox.enqueue("fresh-id", "fresh content") is True
@@ -127,8 +129,7 @@ async def test_stale_content_reconcile_never_overwrites_newer_pending_hash(
 ):
     config = _config(tmp_path)
     engine = RecordingEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
     bucket_id = "same-id"
     old_content = "old content snapshot"
@@ -217,8 +218,7 @@ async def test_reconcile_refreshes_stale_bucket_content_before_queueing(tmp_path
 def test_ensure_pending_never_overwrites_newer_content(tmp_path):
     config = _config(tmp_path)
     engine = RecordingEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
     bucket_id = "repair-cas"
     new_content = "newer content already queued"
@@ -235,8 +235,7 @@ def test_ensure_pending_never_overwrites_newer_content(tmp_path):
 async def test_reconcile_queues_content_for_meaning_only_index_row(tmp_path):
     config = _config(tmp_path)
     engine = RecordingEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
     bucket_id = "meaning-only"
     engine.hashes[bucket_id] = ""
@@ -278,8 +277,7 @@ async def test_reconcile_index_read_failure_does_not_queue_whole_vault(
             raise sqlite3.OperationalError("database is busy")
 
     engine = BrokenIndexEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
 
     queued = await outbox.reconcile(buckets=[{
@@ -304,8 +302,7 @@ async def test_reconcile_hash_read_failure_falls_back_to_index_ids(tmp_path):
     engine = BrokenHashEngine()
     bucket_id = "already-indexed"
     engine.hashes[bucket_id] = content_hash("stored content")
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
 
     queued = await outbox.reconcile(buckets=[{
@@ -335,8 +332,7 @@ async def test_transient_failure_survives_stale_reconcile_and_recovers(
             return True
 
     engine = RecoveringEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
     manager.attach_embedding_outbox(outbox)
     outbox._running = True
@@ -361,30 +357,94 @@ async def test_transient_failure_survives_stale_reconcile_and_recovers(
 
 
 @pytest.mark.asyncio
-async def test_hold_create_queues_content_and_meaning_without_second_worker_pass(
+async def test_merge_or_create_repairs_missing_outbox_item_without_false_warning(
     tmp_path,
+    monkeypatch,
 ):
-    """A durable write must queue both components while Markdown is readable."""
     config = _config(tmp_path)
+    config["merge_threshold"] = 75
     engine = ObservableEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
+    engine.manager = manager
+    outbox = EmbeddingOutbox(config, manager, engine)
+    manager.attach_embedding_outbox(outbox)
+    outbox._running = True
+    monkeypatch.setattr(manager, "search", lambda *_args, **_kwargs: _empty())
+
+    original_create = manager.create
+
+    async def create_then_drop_pending(**kwargs):
+        bucket_id = await original_create(**kwargs)
+        outbox.discard(bucket_id)
+        return bucket_id
+
+    async def _empty():
+        return []
+
+    monkeypatch.setattr(manager, "create", create_then_drop_pending)
+    monkeypatch.setattr(rt, "config", config)
+    monkeypatch.setattr(rt, "bucket_mgr", manager)
+    monkeypatch.setattr(rt, "embedding_engine", engine)
+    monkeypatch.setattr(rt, "logger", MagicMock())
+
+    try:
+        bucket_id, merged, warning = await common.merge_or_create(
+            content="repair an accidentally lost embedding task",
+            tags=[],
+            importance=5,
+            domain=["test"],
+            valence=0.5,
+            arousal=0.3,
+            raw_merge=True,
+            source_tool="hold",
+        )
+    finally:
+        outbox._running = False
+
+    assert merged is False
+    assert warning == ""
+    assert outbox.is_pending(bucket_id) is True
+
+
+@pytest.mark.asyncio
+async def test_hold_create_with_meaning_is_visible_before_embedding_worker_runs(
+    tmp_path,
+    monkeypatch,
+):
+    config = _config(tmp_path)
+    config["merge_threshold"] = 75
+    engine = ObservableEngine()
+    manager = BucketManager(config, embedding_engine=engine)
     engine.manager = manager
     outbox = EmbeddingOutbox(config, manager, engine)
     manager.attach_embedding_outbox(outbox)
 
+    async def no_matches(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(manager, "search", no_matches)
+    monkeypatch.setattr(rt, "config", config)
+    monkeypatch.setattr(rt, "bucket_mgr", manager)
+    monkeypatch.setattr(rt, "embedding_engine", engine)
+    monkeypatch.setattr(rt, "logger", MagicMock())
+
     await outbox.start(reconcile=False)
-    task = asyncio.create_task(
-        manager.create(
-            content="hold body with a separate meaning vector",
-            meaning="why this memory matters",
-        )
-    )
+    task = asyncio.create_task(common.merge_or_create(
+        content="hold body with a separate meaning vector",
+        tags=[],
+        importance=5,
+        domain=["test"],
+        valence=0.5,
+        arousal=0.3,
+        raw_merge=True,
+        source_tool="hold",
+        meaning="why this memory matters",
+    ))
     try:
         await asyncio.wait_for(engine.meaning_started.wait(), timeout=1)
         await asyncio.sleep(0.05)
         engine.release_meaning.set()
-        bucket_id = await asyncio.wait_for(task, timeout=1)
+        bucket_id, merged, warning = await asyncio.wait_for(task, timeout=1)
         assert await outbox.wait_until_idle(timeout=1)
     finally:
         engine.release_meaning.set()
@@ -392,9 +452,8 @@ async def test_hold_create_queues_content_and_meaning_without_second_worker_pass
             task.cancel()
         await outbox.stop()
 
-    bucket = await manager.get(bucket_id)
-    assert bucket is not None
-    assert bucket["metadata"]["meaning"] == ["why this memory matters"]
+    assert merged is False
+    assert warning == ""
     assert engine.visible_during_meaning is True
     assert engine.calls == [
         (bucket_id, "hold body with a separate meaning vector")
@@ -408,8 +467,7 @@ async def test_hold_create_queues_content_and_meaning_without_second_worker_pass
 async def test_background_indexing_never_blocks_markdown_write(tmp_path):
     config = _config(tmp_path)
     engine = BlockingEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
     manager.attach_embedding_outbox(outbox)
 
@@ -435,24 +493,58 @@ async def test_background_indexing_never_blocks_markdown_write(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_create_returns_while_embedding_worker_is_blocked(tmp_path):
-    """Markdown visibility must not wait for a slow embedding provider."""
+@pytest.mark.parametrize("preexisting", [False, True], ids=["create", "merge"])
+async def test_merge_or_create_returns_while_embedding_worker_is_blocked(
+    tmp_path,
+    monkeypatch,
+    preexisting,
+):
     config = _config(tmp_path)
+    config["merge_threshold"] = 75
     engine = BlockingEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
     manager.attach_embedding_outbox(outbox)
     content = "grow returns before a slow embedding provider"
 
+    existing_id = ""
+    if preexisting:
+        existing_id = await manager.create(
+            content=content,
+            defer_derived_index=True,
+        )
+        outbox.discard(existing_id)
+
+    async def no_matches(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(manager, "search", no_matches)
+    monkeypatch.setattr(rt, "config", config)
+    monkeypatch.setattr(rt, "bucket_mgr", manager)
+    monkeypatch.setattr(rt, "embedding_engine", engine)
+    monkeypatch.setattr(rt, "logger", MagicMock())
+
     await outbox.start(reconcile=False)
     try:
-        bucket_id = await asyncio.wait_for(
-            manager.create(content=content),
+        bucket_id, merged, warning = await asyncio.wait_for(
+            common.merge_or_create(
+                content=content,
+                tags=[],
+                importance=5,
+                domain=["test"],
+                valence=0.5,
+                arousal=0.3,
+                raw_merge=False,
+                source_tool="grow",
+            ),
             timeout=0.2,
         )
         bucket = await manager.get(bucket_id)
 
+        assert merged is preexisting
+        assert warning == ""
+        if preexisting:
+            assert bucket_id == existing_id
         assert bucket is not None
         assert bucket["content"] == content
         assert outbox.is_pending(bucket_id)
@@ -467,8 +559,7 @@ async def test_create_returns_while_embedding_worker_is_blocked(tmp_path):
 async def test_retry_state_survives_restart_and_recovers(tmp_path):
     config = _config(tmp_path)
     failing = FailingEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = failing
+    manager = BucketManager(config, embedding_engine=failing)
     outbox = EmbeddingOutbox(config, manager, failing)
     manager.attach_embedding_outbox(outbox)
 
@@ -496,8 +587,7 @@ async def test_retry_state_survives_restart_and_recovers(tmp_path):
 async def test_content_changed_during_indexing_is_requeued(tmp_path):
     config = _config(tmp_path)
     engine = BlockingEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
     manager.attach_embedding_outbox(outbox)
 
@@ -523,15 +613,14 @@ async def test_content_changed_during_indexing_is_requeued(tmp_path):
 async def test_all_memory_types_persist_while_embedding_is_disabled(tmp_path):
     config = _config(tmp_path, enabled=False)
     engine = DisabledEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
     manager.attach_embedding_outbox(outbox)
 
     await outbox.start(reconcile=False)
     try:
         ids = []
-        for bucket_type in ("dynamic", "permanent", "feel"):
+        for bucket_type in ("dynamic", "permanent", "feel", "plan", "letter"):
             ids.append(
                 await manager.create(
                     content=f"offline {bucket_type}",
@@ -556,8 +645,7 @@ async def test_provider_circuit_breaker_stops_failure_storm_and_recovers(tmp_pat
         circuit_max_seconds=5,
     )
     failing = FailingEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = failing
+    manager = BucketManager(config, embedding_engine=failing)
     outbox = EmbeddingOutbox(config, manager, failing)
     manager.attach_embedding_outbox(outbox)
 
@@ -613,8 +701,7 @@ async def test_poison_item_does_not_trip_circuit_or_block_other_items(tmp_path):
             return True
 
     engine = LazyPoisonEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
     manager.attach_embedding_outbox(outbox)
 
@@ -659,8 +746,7 @@ async def test_cancel_after_meaning_commit_survives_outbox_reload(
             self.meaning_calls.append((bucket_id, ""))
 
     engine = MeaningEngine()
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     bucket_id = await manager.create("durable meaning base")
     outbox = EmbeddingOutbox(config, manager, engine)
     manager.attach_embedding_outbox(outbox)
@@ -949,8 +1035,7 @@ async def test_reconcile_distinguishes_legacy_vector_from_meaning_only_row(
                VALUES (?, '', ?, '', ?)""",
             ("meaning-only", "2026-01-01T00:00:00Z", "[0.2]"),
         )
-    manager = BucketManager(config)
-    manager.embedding_engine = engine
+    manager = BucketManager(config, embedding_engine=engine)
     outbox = EmbeddingOutbox(config, manager, engine)
 
     async def get_bucket(bucket_id):
@@ -981,3 +1066,176 @@ async def test_reconcile_distinguishes_legacy_vector_from_meaning_only_row(
     assert queued == 1
     assert outbox.pending_ids() == {"meaning-only"}
 
+
+@pytest.mark.asyncio
+async def test_dashboard_backfill_delegates_to_running_outbox(monkeypatch):
+    buckets = [{"id": "one", "content": "content", "metadata": {}}]
+
+    class Manager:
+        async def list_all(self, include_archive=False):
+            assert include_archive is True
+            return buckets
+
+        async def get(self, bucket_id):
+            assert bucket_id == "orphan"
+            return None
+
+    class Outbox:
+        running = True
+
+        def __init__(self):
+            self.reconciled = False
+            self.retried = False
+
+        async def reconcile(self, **kwargs):
+            self.reconciled = kwargs["buckets"] == buckets
+            return 1
+
+        def status(self):
+            return {"pending": 1, "retrying": 0}
+
+        def retry_now(self):
+            self.retried = True
+            return 1
+
+    outbox = Outbox()
+
+    class Engine(DisabledEngine):
+        def list_all_ids(self):
+            return ["one", "orphan"]
+
+        def delete_embedding(self, bucket_id):
+            assert bucket_id == "orphan"
+            self.deleted = bucket_id
+
+    engine = Engine()
+    state = {
+        "running": True,
+        "scanned": 0,
+        "missing": 0,
+        "done": 0,
+        "failed": 0,
+        "queued": 0,
+        "status": "scanning",
+        "error": "",
+    }
+    monkeypatch.setattr(embedding_web.sh, "bucket_mgr", Manager())
+    monkeypatch.setattr(embedding_web.sh, "embedding_outbox", outbox)
+    monkeypatch.setattr(embedding_web.sh, "embedding_engine", engine)
+    monkeypatch.setattr(embedding_web, "_backfill_state", state)
+
+    await embedding_web._backfill_run()
+
+    assert outbox.reconciled is True
+    assert outbox.retried is True
+    assert state["status"] == "queued"
+    assert state["queued"] == 1
+    assert state["orphaned"] == 1
+    assert state["cleaned"] == 1
+    assert state["cleanup_failed"] == 0
+    assert engine.deleted == "orphan"
+    assert state["running"] is False
+
+
+@pytest.mark.asyncio
+async def test_dashboard_backfill_does_not_delete_new_bucket_from_stale_snapshot(
+    monkeypatch,
+):
+    bucket_id = "created-after-backfill-snapshot"
+
+    class Manager:
+        async def list_all(self, include_archive=False):
+            assert include_archive is True
+            return []
+
+        async def get(self, requested_id):
+            assert requested_id == bucket_id
+            return {
+                "id": bucket_id,
+                "content": "newly published memory",
+                "metadata": {},
+            }
+
+    class Engine:
+        enabled = True
+
+        def __init__(self):
+            self.deleted = []
+
+        def list_all_ids(self):
+            return [bucket_id]
+
+        def delete_embedding(self, requested_id):
+            self.deleted.append(requested_id)
+
+    class Outbox:
+        running = True
+
+        async def reconcile(self, **kwargs):
+            assert kwargs["buckets"] == []
+            return 0
+
+        def retry_now(self):
+            return 0
+
+        def status(self):
+            return {"pending": 0, "retrying": 0}
+
+    engine = Engine()
+    state = {
+        "running": True,
+        "scanned": 0,
+        "missing": 0,
+        "done": 0,
+        "failed": 0,
+        "queued": 0,
+        "status": "scanning",
+        "error": "",
+    }
+    monkeypatch.setattr(embedding_web.sh, "bucket_mgr", Manager())
+    monkeypatch.setattr(embedding_web.sh, "embedding_outbox", Outbox())
+    monkeypatch.setattr(embedding_web.sh, "embedding_engine", engine)
+    monkeypatch.setattr(embedding_web, "_backfill_state", state)
+
+    await embedding_web._backfill_run()
+
+    assert engine.deleted == []
+    assert state["orphaned"] == 0
+    assert state["cleaned"] == 0
+    assert state["cleanup_failed"] == 0
+    assert state["status"] == "queued"
+
+
+def test_embedding_info_exposes_outbox_status(monkeypatch):
+    class MCP:
+        def __init__(self):
+            self.routes = {}
+
+        def custom_route(self, path, methods):
+            def decorator(handler):
+                for method in methods:
+                    self.routes[(method, path)] = handler
+                return handler
+
+            return decorator
+
+    backend = SimpleNamespace(model_name=lambda: "test", vector_dim=lambda: 3)
+    engine = SimpleNamespace(
+        enabled=True,
+        backend="api",
+        api_format="ollama",
+        _backend=backend,
+        db_path="",
+    )
+    outbox = SimpleNamespace(status=lambda: {"pending": 2, "retrying": 1})
+    monkeypatch.setattr(embedding_web.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(embedding_web.sh, "embedding_engine", engine)
+    monkeypatch.setattr(embedding_web.sh, "embedding_outbox", outbox)
+
+    mcp = MCP()
+    embedding_web.register(mcp)
+    response = asyncio.run(mcp.routes[("GET", "/api/embedding/info")](object()))
+    payload = json.loads(response.body.decode("utf-8"))
+
+    assert payload["api_format"] == "ollama"
+    assert payload["outbox"] == {"pending": 2, "retrying": 1}

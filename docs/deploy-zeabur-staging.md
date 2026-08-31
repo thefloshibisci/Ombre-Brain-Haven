@@ -8,7 +8,7 @@
 
 ## 拓扑
 
-- Haven `server.py`：内部 `8000`，MCP、Dashboard、bucket API。
+- 当前 OB `src/server.py`：内部 `8000`，MCP、Dashboard、bucket API。
 - Haven `gateway.py`：内部 `8010`，OpenAI/Anthropic 网关。
 - Xinchao：内部 `18110`，动态状态、recent continuity、MCP。
 - 入口代理：容器唯一公网端口 `9000`；Zeabur 注入的 `PORT` 会被复制为 `OMBRE_PROXY_PORT`。
@@ -21,7 +21,7 @@
 | `/xinchao/...` | Xinchao（`/xinchao` 会被剥除） |
 | 其他路径 | Haven MCP / Dashboard |
 
-`entrypoint_zeabur.py` 同时启动四个进程；任一子进程退出就终止整组，便于 Zeabur 拉起新实例。
+`entrypoint_zeabur.py` 同时启动四个进程：`src/server.py`（当前 OB）、`gateway.py`、`proxy_server.py` 和 Xinchao；任一子进程退出就终止整组，便于 Zeabur 拉起新实例。
 
 ## Zeabur 设置
 

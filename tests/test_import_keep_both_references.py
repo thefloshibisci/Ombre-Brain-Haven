@@ -17,20 +17,20 @@ from unittest.mock import Mock
 import frontmatter
 import pytest
 
-from backup_archive import (
+from haven_imports import (
     BackupArchiveError,
+    BucketManager,
+    EmbeddingEngine,
+    MigrateEngine,
+    SourceStore,
+    backup_archive,
     build_export_archive,
     build_export_archive_file,
     extract_backup_archive_file,
     read_backup_archive,
+    source_attach as attach,
+    migrate_engine,
 )
-from bucket_manager import BucketManager
-from embedding_engine import EmbeddingEngine
-from migrate_engine import MigrateEngine
-from source_bindings import attach
-from source_store import SourceStore
-
-import migrate_engine
 
 
 def _config(root: Path) -> dict:

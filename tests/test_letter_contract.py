@@ -1,7 +1,7 @@
 import pytest
 
-from bucket_manager import BucketManager
-from letter_service import letter_lock_update, letter_read, letter_write
+from haven_imports import BucketManager
+from haven_imports import letter_lock_update, letter_read, letter_write
 
 
 @pytest.fixture

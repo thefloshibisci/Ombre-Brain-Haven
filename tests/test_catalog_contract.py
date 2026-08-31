@@ -1,8 +1,8 @@
 import pytest
 
-from bucket_manager import BucketManager
+from haven_imports import BucketManager
 from catalog import surface_catalog
-from letter_service import letter_write
+from haven_imports import letter_write
 from relation_bindings import attach as relation_attach
 from source_bindings import attach as source_attach
 from source_store import SourceStore

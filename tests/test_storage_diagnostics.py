@@ -3,8 +3,7 @@ import json
 import sqlite3
 from types import SimpleNamespace
 
-import server
-from bucket_manager import BucketManager
+from haven_imports import BucketManager, server
 
 
 def run(awaitable):

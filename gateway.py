@@ -7,7 +7,9 @@ import json
 import codecs
 import time
 import asyncio
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -21,6 +23,39 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
+
+# Haven keeps a root-level compatibility sidecar alongside the upstream
+# `src/` runtime. Pytest puts `src/` first for upstream tests, so explicitly
+# restore root precedence before importing Gateway-only legacy modules; otherwise
+# `from utils import ...` can resolve to `src/utils.py` and break the sidecar.
+_ORIGINAL_SYS_PATH = list(sys.path)
+_ROOT_DIR = str(Path(__file__).resolve().parent)
+_SRC_DIR = Path(_ROOT_DIR) / "src"
+
+# Pytest loads the upstream runtime as top-level modules (for example
+# `utils`/`errors`) while Haven's Gateway still uses root-level compatibility
+# modules with the same names. Temporarily remove only already-loaded modules
+# originating from `src/`; after the sidecar imports below, restore those
+# module objects so upstream tests and the two runtimes do not poison each
+# other's import cache.
+_UPSTREAM_MODULE_CACHE: dict[str, object] = {}
+for _module_name, _module in list(sys.modules.items()):
+    _module_file = getattr(_module, "__file__", "")
+    if not _module_file or "." in _module_name:
+        continue
+    try:
+        _is_upstream_module = Path(_module_file).resolve().is_relative_to(_SRC_DIR.resolve())
+    except (OSError, ValueError):
+        _is_upstream_module = False
+    if _is_upstream_module:
+        _UPSTREAM_MODULE_CACHE[_module_name] = _module
+        sys.modules.pop(_module_name, None)
+
+try:
+    sys.path.remove(_ROOT_DIR)
+except ValueError:
+    pass
+sys.path.insert(0, _ROOT_DIR)
 
 # Gateway runs as its own process, so it must load the dashboard-saved
 # keys itself; the parent's os.environ mutations never reach it.
@@ -126,6 +161,32 @@ from utils import (
     strip_wikilinks,
 )
 from word_map import WordMapStore
+
+# Restore upstream top-level modules for the rest of the process. Gateway's
+# imported symbols retain the root-sidecar implementations they were bound to.
+for _module_name, _module in _UPSTREAM_MODULE_CACHE.items():
+    sys.modules[_module_name] = _module
+# If Gateway was imported before any upstream test module, clear the root-sidecar
+# cache entries that have a same-named `src/` module. With the original path
+# order restored below, later imports will then resolve to the upstream runtime;
+# Gateway's already-bound symbols continue to use the sidecar objects.
+for _module_name, _module in list(sys.modules.items()):
+    if "." in _module_name or _module_name in _UPSTREAM_MODULE_CACHE:
+        continue
+    _module_file = getattr(_module, "__file__", "")
+    if not _module_file:
+        continue
+    try:
+        _is_root_duplicate = Path(_module_file).resolve().parent == Path(_ROOT_DIR).resolve()
+        _has_upstream_twin = (_SRC_DIR / f"{_module_name}.py").is_file()
+    except OSError:
+        _is_root_duplicate = False
+        _has_upstream_twin = False
+    if _is_root_duplicate and _has_upstream_twin:
+        sys.modules.pop(_module_name, None)
+# Do not leave the temporary sidecar precedence in the host process. This is
+# important when pytest imports Gateway before later upstream `src` tests.
+sys.path[:] = _ORIGINAL_SYS_PATH
 
 logger = logging.getLogger("ombre_brain.gateway")
 GENERIC_LEXICAL_STOPWORD_KEYS = frozenset(

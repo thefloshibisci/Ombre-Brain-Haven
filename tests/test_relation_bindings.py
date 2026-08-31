@@ -6,17 +6,17 @@ from pathlib import Path
 
 import pytest
 
-from bucket_manager import BucketManager
-from relation_store import (
+from haven_imports import BucketManager
+from haven_imports import (
     normalize_relation_label,
     normalize_relation_links,
     normalize_relation_type,
     relation_display_label,
     relation_hint,
     reverse_relation_type,
+    relation_read,
 )
-from relation_bindings import attach, detach, restore
-from relation_read import dispatch as relation_read
+from haven_imports import relation_attach as attach, relation_detach as detach, relation_restore as restore
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pathlib import Path
 
-from bucket_manager import BucketManager
+from haven_imports import BucketManager
 
 
 @pytest.fixture

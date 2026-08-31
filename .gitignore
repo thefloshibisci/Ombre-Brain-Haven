@@ -47,3 +47,4 @@ backup_*/
 *.db
 import_state.json
 .codex
+!tests/test_raw_events.py

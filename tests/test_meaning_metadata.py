@@ -1,6 +1,6 @@
 import asyncio
 
-from bucket_manager import BucketManager
+from haven_imports import BucketManager
 
 
 def run(awaitable):

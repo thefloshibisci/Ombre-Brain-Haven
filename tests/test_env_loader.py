@@ -140,7 +140,7 @@ def test_fresh_process_reads_keys_from_state_dir(tmp_path):
 
 def test_writer_and_parser_round_trip(monkeypatch, tmp_path):
     """server.py's writer output must be readable back by the parser."""
-    import server
+    from haven_imports import server
 
     env_file = tmp_path / ".env"
     monkeypatch.setenv("OMBRE_ENV_PATH", str(env_file))
