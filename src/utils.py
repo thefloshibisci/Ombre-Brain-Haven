@@ -297,11 +297,13 @@ def atomic_update_config_yaml(mutate: Callable[[dict], None]) -> dict:
     tmp = ""
     with _config_yaml_lock:
         save_config: dict = {}
+        previous_payload: bytes | None = None
         if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                save_config = yaml.safe_load(f) or {}
+            with open(config_path, "rb") as f:
+                previous_payload = f.read()
+            save_config = yaml.safe_load(previous_payload.decode("utf-8")) or {}
         if not isinstance(save_config, dict):
-            save_config = {}
+            raise ValueError("config.yaml top level must be a mapping")
         mutate(save_config)
         try:
             parent = os.path.dirname(os.path.abspath(config_path))
@@ -334,14 +336,25 @@ def atomic_update_config_yaml(mutate: Callable[[dict], None]) -> dict:
                 if persisted != save_config:
                     raise OSError("config.yaml verification failed after write")
             except Exception as verify_error:
-                if fallback_backup is not None:
-                    try:
+                try:
+                    if fallback_backup is not None:
                         _write_bytes_and_sync(config_path, fallback_backup)
-                    except Exception as restore_error:
-                        raise OSError(
-                            "config.yaml verification failed and restoring the "
-                            f"previous bind-mounted file also failed: {restore_error}"
-                        ) from verify_error
+                    elif previous_payload is None:
+                        os.unlink(config_path)
+                    else:
+                        descriptor, tmp = tempfile.mkstemp(
+                            prefix=f".{os.path.basename(config_path)}.tmp.", dir=parent,
+                        )
+                        with os.fdopen(descriptor, "wb") as rollback:
+                            rollback.write(previous_payload)
+                            rollback.flush()
+                            os.fsync(rollback.fileno())
+                        os.replace(tmp, config_path)
+                except Exception as restore_error:
+                    raise OSError(
+                        "config.yaml verification failed and restoring the "
+                        f"previous file also failed: {restore_error}"
+                    ) from verify_error
                 raise
         finally:
             try:

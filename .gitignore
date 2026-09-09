@@ -48,3 +48,7 @@ backup_*/
 import_state.json
 .codex
 !tests/test_raw_events.py
+!tests/test_dashboard_care_contract.py
+!tests/test_legacy_compat_web.py
+!tests/test_config_api_extended.py
+!tests/test_atomic_config_yaml.py

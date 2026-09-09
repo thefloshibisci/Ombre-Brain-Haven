@@ -959,6 +959,37 @@ async def test_migrate_rejects_bucket_over_runtime_content_limit(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_migrate_ignores_runtime_seeded_docs_outside_memory_limit(tmp_path):
+    source_vault = tmp_path / "source"
+    _write_bucket(source_vault)
+    runtime_docs = source_vault / "_app" / "docs"
+    runtime_docs.mkdir(parents=True)
+    (runtime_docs / "INTERNALS.md").write_text("x" * 171_958, encoding="utf-8")
+
+    payload, _ = build_export_archive(
+        str(source_vault),
+        "",
+        {"embedding": {}},
+    )
+
+    target_vault = tmp_path / "target"
+    target_config = _config(target_vault)
+    target_engine = _engine(target_config)
+    manager = BucketManager(target_config, embedding_engine=target_engine)
+    migrate = MigrateEngine(target_config, manager, target_engine)
+
+    result = await migrate.parse_zip(payload)
+
+    assert result["ok"] is True
+    assert result["total_buckets"] == 1
+    assert result["ignored_members"] == ["buckets/_app/docs/INTERNALS.md"]
+
+    await migrate.apply({})
+    assert (await manager.get("memory-1"))["content"] == "important memory"
+    assert not (target_vault / "dynamic" / "_app").exists()
+
+
+@pytest.mark.asyncio
 async def test_migrate_rejects_non_json_safe_yaml_metadata(tmp_path):
     source_vault = tmp_path / "source"
     path = source_vault / "dynamic" / "general" / "unsafe.md"

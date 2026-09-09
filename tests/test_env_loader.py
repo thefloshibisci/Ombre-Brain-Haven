@@ -12,7 +12,9 @@ import textwrap
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT_IMPORT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT_IMPORT_PATH not in sys.path:
+    sys.path.append(_ROOT_IMPORT_PATH)
 
 from env_loader import load_env_file, ombre_env_path, parse_env_line  # noqa: E402
 

@@ -321,9 +321,24 @@ restart_github_auto_task = None # def(interval_minutes: int) -> None（起停后
 
 
 # --- 项目 .env 读写（config / env-config / host-vault 路由共用，故放共享层）---
-# 与原 server.py 行为一致：.env 落在 src/.env。本文件在 src/web/ 下，上两级即 src/。
+# Keep this resolver in lockstep with the root env_loader. Dashboard writes must
+# be visible to a freshly started server and to sidecars after a restart.
 def _project_env_path() -> str:
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    explicit = os.environ.get("OMBRE_ENV_PATH", "").strip()
+    if explicit:
+        return explicit
+
+    state_dir = os.environ.get("OMBRE_STATE_DIR", "").strip()
+    if state_dir:
+        return os.path.join(state_dir, ".env")
+
+    configured_root = str(globals().get("repo_root", "") or "").strip()
+    if configured_root:
+        return os.path.join(configured_root, ".env")
+
+    # _shared.py lives at <repo>/src/web/_shared.py.
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(repo_root, ".env")
 
 
 def _read_env_var(name: str) -> str:
@@ -353,6 +368,7 @@ def _write_env_var(name: str, value: str) -> None:
     Preserves other entries verbatim. Quotes values containing spaces.
     """
     env_path = _project_env_path()
+    os.makedirs(os.path.dirname(os.path.abspath(env_path)), exist_ok=True)
     quoted = f'"{value}"' if value and (" " in value or "#" in value) else value
     new_line = f"{name}={quoted}\n"
 

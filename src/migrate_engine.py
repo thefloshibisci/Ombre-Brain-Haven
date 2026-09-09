@@ -111,6 +111,9 @@ _DEFAULT_MAX_METADATA_BYTES = 16 * 1024
 _MAX_UNLIMITED_MIGRATE_BUCKET_BYTES = 8 * 1024 * 1024
 _MAX_UNLIMITED_MIGRATE_METADATA_BYTES = 1024 * 1024
 _FRONTMATTER_OVERHEAD_BYTES = 64 * 1024
+# Runtime-seeded documentation lives under the vault for diagnostics/code
+# discovery, but it is not user memory and must not be imported as a bucket.
+_AUXILIARY_BUCKET_DOC_PREFIX = "buckets/_app/docs/"
 _EMBEDDING_FETCH_BATCH = 32
 _MAX_EMBEDDING_CELL_BYTES = 1024 * 1024
 _MAX_EMBEDDING_DIMENSIONS = 65_536
@@ -264,6 +267,12 @@ def _parse_md_meta(raw: bytes) -> tuple[dict, str]:
         return {}, ""
 
 
+def _is_auxiliary_bucket_doc(archive_path: str) -> bool:
+    """Return whether an exported markdown member is runtime documentation."""
+
+    return archive_path.startswith(_AUXILIARY_BUCKET_DOC_PREFIX)
+
+
 def _safe_str(val: Any, max_len: int = 512) -> str:
     """安全地将值转为字符串，并截断。"""
     return str(val)[:max_len] if val is not None else ""
@@ -312,6 +321,7 @@ class MigrateEngine:
         self._integrity_verified: bool = False
         self._integrity_warning: str = ""
         self._backup_manifest: Optional[dict[str, Any]] = None
+        self._ignored_members: list[str] = []
 
         # ---- 执行阶段计数 ----
         self._apply_total: int = 0
@@ -396,6 +406,7 @@ class MigrateEngine:
         self._integrity_verified = False
         self._integrity_warning = ""
         self._backup_manifest = None
+        self._ignored_members = []
         self._total_buckets = 0
         self._apply_errors = []
         self._apply_imported = 0
@@ -531,6 +542,7 @@ class MigrateEngine:
             "has_embeddings": self._has_embeddings,
             "integrity_verified": self._integrity_verified,
             "integrity_warning": self._integrity_warning,
+            "ignored_members": list(self._ignored_members),
             "backup_manifest": {
                 "schema_version": self._backup_manifest.get("schema_version"),
                 "created_at": self._backup_manifest.get("created_at", ""),
@@ -689,6 +701,10 @@ class MigrateEngine:
         self._integrity_verified = bool(parsed.get("integrity_verified"))
         self._integrity_warning = str(parsed.get("integrity_warning") or "")
         manifest = parsed.get("manifest")
+        self._ignored_members = [
+            str(item) for item in (parsed.get("ignored_members") or [])
+            if isinstance(item, str)
+        ]
         self._backup_manifest = (
             {
                 "schema_version": manifest.get("schema_version"),
@@ -820,6 +836,7 @@ class MigrateEngine:
         db_bytes: Optional[bytes] = None
         db_path = ""
         source_members: dict[str, bytes | str] = {}
+        ignored_members: list[str] = []
         you_db_bytes: Optional[bytes] = None
         you_db_path = ""
         them_db_bytes: Optional[bytes] = None
@@ -909,6 +926,9 @@ class MigrateEngine:
         for arc_path in sorted(names):
             if not arc_path.startswith("buckets/") or not arc_path.endswith(".md"):
                 continue
+            if _is_auxiliary_bucket_doc(arc_path):
+                ignored_members.append(arc_path)
+                continue
             try:
                 content_limit = self._bucket_content_limit()
                 raw = self._read_member(
@@ -990,6 +1010,7 @@ class MigrateEngine:
             "integrity_verified": package["integrity_verified"],
             "integrity_warning": integrity_warning,
             "manifest": package["manifest"],
+            "ignored_members": ignored_members,
         }
 
     async def _identify_conflicts(self) -> None:

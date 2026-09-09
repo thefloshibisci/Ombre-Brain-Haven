@@ -16,15 +16,20 @@ web/config_api.py — Dashboard 配置 / 环境变量 / API Key 测试 / 模型�
 ========================================
 """
 
+import asyncio
 import copy
+import errno
 import math
 import os
+import re
 import secrets
 import sys
+import tempfile
 import threading
 from collections.abc import Mapping
 
 import httpx
+import yaml
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -73,6 +78,45 @@ _MAX_PROVIDER_URL_CHARS = 2048
 _MAX_PROVIDER_FORMAT_CHARS = 64
 _MAX_ENV_VALUE_CHARS = 8192
 
+_MODEL_API_KEY_ENV = {
+    "dehydration": "OMBRE_COMPRESS_API_KEY",
+    "embedding": "OMBRE_EMBED_API_KEY",
+}
+_SECRET_CONFIG_KEY_NAMES = frozenset(
+    {
+        "api_key",
+        "api_keys",
+        "api_key_values",
+        "access_token",
+        "refresh_token",
+        "client_secret",
+        "password",
+        "secret",
+        "secrets",
+        "token",
+        "credential",
+        "credentials",
+        "authorization",
+        "private_key",
+    }
+)
+_MASKED_SECRET_RE = re.compile(r"^[^\s.]{1,8}\.\.\.[^\s.]{1,8}$")
+
+
+class _CrossLoopAsyncLock:
+    """Async mutex that remains safe when routes run on different event loops."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+
+    async def __aenter__(self):
+        while not self._lock.acquire(blocking=False):
+            await asyncio.sleep(0.005)
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _tb) -> None:
+        self._lock.release()
+
 
 def _bounded_config_int(value, field: str, low: int, high: int) -> int:
     if isinstance(value, bool):
@@ -102,6 +146,976 @@ def _bounded_config_float(value, field: str, low: float, high: float) -> float:
     if not math.isfinite(parsed) or not low <= parsed <= high:
         raise ValueError(f"{field} must be a finite number in [{low},{high}]")
     return parsed
+
+
+
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_EXTENDED_CONFIG_SECTIONS = (
+    "gateway", "recall", "memory_diffusion", "reranker", "persona",
+    "dream", "reflection", "portrait", "self_anchor",
+)
+_SECRET_ENV_BY_SECTION = {
+    "reranker": "OMBRE_RERANKER_API_KEY",
+    "persona": "OMBRE_PERSONA_API_KEY",
+    "dream": "OMBRE_DREAM_API_KEY",
+    "reflection": "OMBRE_REFLECTION_API_KEY",
+    "portrait": "OMBRE_PORTRAIT_API_KEY",
+}
+_GATEWAY_SECRET_ENV = "OMBRE_DOMAIN_SENTINEL_API_KEY"
+
+_GATEWAY_BOOL_FIELDS = {
+    "semantic_session_dedupe_enabled", "just_now_context_enabled",
+    "memory_sentinel_enabled", "domain_sentinel_enabled",
+    "domain_sentinel_enable_thinking", "date_persona_trace_enabled",
+    "date_persona_trace_include_daily", "date_recall_enabled",
+    "operit_context_rewrite_enabled", "word_map_hint_enabled",
+    "portrait_memory_enabled", "portrait_memory_include_anchors",
+    "query_planner_enabled", "semantic_rescue_enabled",
+    "memory_detail_recall_enabled",
+}
+_GATEWAY_INT_FIELDS = {
+    "skip_recent_rounds": (0, 10000),
+    "recent_context_budget": (0, 200000),
+    "just_now_context_max_turns": (0, 10000),
+    "just_now_context_budget": (0, 200000),
+    "conversation_turns_max_entries": (0, 100000),
+    "domain_sentinel_max_tokens": (1, 100000),
+    "date_persona_trace_budget": (0, 200000),
+    "date_persona_trace_max_events": (0, 10000),
+    "date_recall_budget": (0, 200000),
+    "date_recall_max_turns": (0, 10000),
+    "date_recall_max_buckets": (0, 1000),
+    "recalled_memory_budget": (0, 200000),
+    "related_memory_budget": (0, 200000),
+    "semantic_candidate_top_k": (1, 1000),
+    "moment_search_limit": (1, 1000),
+    "diffusion_inject_max_items": (0, 100),
+    "diffusion_explore_multiplier": (1, 100),
+    "current_inner_state_interval_rounds": (0, 10000),
+    "portrait_memory_budget": (0, 200000),
+    "portrait_memory_max_sources": (0, 1000),
+    "query_planner_min_chars": (0, 100000),
+    "query_planner_max_queries": (1, 100),
+    "query_planner_max_tokens": (1, 100000),
+    "semantic_rescue_candidate_limit": (1, 1000),
+    "semantic_rescue_max_tokens": (1, 100000),
+    "memory_detail_recall_max_ids": (1, 100),
+    "memory_detail_recall_budget": (0, 200000),
+}
+_GATEWAY_FLOAT_FIELDS = {
+    "cooldown_hours": (0.0, 87600.0),
+    "recent_context_cooldown_hours": (0.0, 87600.0),
+    "recent_context_reentry_idle_hours": (0.0, 87600.0),
+    "semantic_session_dedupe_threshold": (0.0, 1.0),
+    "semantic_session_dedupe_lexical_threshold": (0.0, 1.0),
+    "just_now_context_hours": (0.0, 87600.0),
+    "domain_sentinel_timeout_seconds": (0.1, 600.0),
+    "bucket_list_cache_ttl_seconds": (0.0, 86400.0),
+    "diffusion_inject_min_confidence": (0.0, 1.0),
+    "semantic_rescue_timeout_seconds": (0.1, 600.0),
+}
+_GATEWAY_STRING_FIELDS = {
+    "query_planner_model", "domain_sentinel_model", "domain_sentinel_base_url",
+}
+_GATEWAY_CHOICES = {
+    "direct_render_mode": {"auto", "compact", "full"},
+    "retrieval_mode": {"graph", "bucket"},
+    "recall_fusion_mode": {"dynamic", "legacy"},
+}
+
+_SECTION_RULES = {
+    "recall": {"query_resurface_enabled": ("bool",)},
+    "memory_diffusion": {
+        "enabled": ("bool",), "max_hops": ("int", 1, 8),
+        "top_k": ("int", 0, 20), "min_activation": ("float", 0, 10),
+        "max_paths_per_hit": ("int", 1, 10), "chain_walk_enabled": ("bool",),
+        "chain_max_hops": ("int", 1, 12), "chain_min_strength": ("float", 0, 10),
+        "chain_min_confidence": ("float", 0, 1),
+        "chain_min_relation_priority": ("int", 0, 100),
+        "chain_max_frontier": ("int", 1, 200),
+    },
+    "reranker": {
+        "enabled": ("bool",), "model": ("str",), "base_url": ("str",),
+        "timeout_seconds": ("float", 1, 120), "candidate_limit": ("int", 1, 100),
+        "score_weight": ("float", 0, 1),
+    },
+    "persona": {
+        "enabled": ("bool",), "event_recording_enabled": ("bool",),
+        "conflict_nudge_enabled": ("bool",), "model": ("str",), "base_url": ("str",),
+    },
+    "dream": {
+        "enabled": ("bool",), "auto_enabled": ("bool",), "surface_enabled": ("bool",),
+        "inject_enabled": ("bool",), "retain_after_inject": ("bool",),
+        "raw_residue_enabled": ("bool",), "model": ("str",), "base_url": ("str",),
+        "identity_anchor_id": ("str",), "thinking_mode": ("str",),
+        "temperature": ("float", 0, 2), "max_tokens": ("int", 1, 100000),
+        "daily_hour": ("int", 0, 23), "run_window_hours": ("int", 1, 24),
+        "daily_probability": ("float", 0, 1), "min_material_count": ("int", 0, 100000),
+        "material_window_hours": ("int", 1, 87600), "raw_residue_turns": ("int", 0, 10000),
+        "raw_residue_max_chars": ("int", 0, 1000000),
+    },
+    "reflection": {
+        "enabled": ("bool",), "auto_enabled": ("bool",), "daily_enabled": ("bool",),
+        "memory_affect_anchor_enabled": ("bool",),
+        "relationship_weather_affect_anchor_enabled": ("bool",),
+        "daily_activity_summary_enabled": ("bool",), "model": ("str",),
+        "base_url": ("str",), "thinking_mode": ("choice", {"", "enabled", "disabled"}),
+        "daily_min_memory_items": ("int", 0, 100000),
+        "daily_conversation_turn_limit": ("int", 0, 100000),
+        "daily_activity_summary_turn_limit": ("int", 0, 100000),
+        "daily_activity_summary_max_tokens": ("int", 1, 100000),
+        "daily_chat_memory_mode": ("choice", {"auto", "review", "off"}),
+        "daily_chat_memory_hour": ("int", 0, 23),
+        "daily_chat_memory_turn_limit": ("int", 0, 100000),
+        "daily_chat_memory_max_per_day": ("int", 0, 100000),
+        "daily_chat_memory_min_confidence": ("float", 0, 1),
+        "daily_chat_memory_review_max_per_day": ("int", 0, 100000),
+        "daily_chat_memory_review_min_confidence": ("float", 0, 1),
+        "daily_chat_memory_summary_enabled": ("bool",),
+        "daily_chat_memory_summary_window_turns": ("int", 1, 200),
+        "daily_chat_memory_summary_stride_turns": ("int", 1, 200),
+        "daily_chat_memory_api_key_env": ("str",),
+        "daily_chat_memory_base_url": ("str",),
+        "daily_chat_memory_timeout_seconds": ("float", 30, 300),
+        "daily_chat_memory_summary_model": ("str",),
+        "daily_chat_memory_summary_max_tokens": ("int", 300, 4000),
+        "daily_chat_memory_candidate_model": ("str",),
+        "daily_chat_memory_candidate_max_tokens": ("int", 300, 4000),
+    },
+    "portrait": {
+        "enabled": ("bool",), "auto_enabled": ("bool",),
+        "auto_initial_enabled": ("bool",), "daily_enabled": ("bool",),
+        "model": ("str",), "base_url": ("str",), "state_path": ("str",),
+        "thinking_mode": ("choice", {"", "enabled", "disabled"}),
+        "temperature": ("float", 0, 2), "max_tokens": ("int", 1, 100000),
+        "daily_hour": ("int", 0, 23), "check_interval_minutes": ("int", 1, 10080),
+        "material_limit": ("int", 1, 100000), "first_run_material_limit": ("int", 1, 100000),
+        "persona_events_limit": ("int", 0, 100000), "recent_buffer_max": ("int", 0, 100000),
+        "staging_pool_max": ("int", 0, 100000), "candidate_max": ("int", 0, 100000),
+        "user_rewrite_evidence_delta": ("int", 0, 100000),
+        "manual_suppress_days": ("int", 0, 36500),
+    },
+    "self_anchor": {"entry_bucket_id": ("str",)},
+}
+
+
+def _mask_secret(value: object) -> str:
+    secret = str(value or "").strip()
+    if not secret:
+        return ""
+    if len(secret) <= 8:
+        return "***"
+    return f"{secret[:4]}...{secret[-4:]}"
+
+
+def _config_section(config: Mapping[str, object], name: str) -> dict:
+    value = config.get(name, {})
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _dashboard_split_names(value) -> list[str]:
+    candidates = re.split(r"[\n,]+", value) if isinstance(value, str) else value if isinstance(value, list) else []
+    names: list[str] = []
+    for candidate in candidates:
+        name = str(candidate or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _dashboard_api_key_values(value) -> list[str]:
+    candidates = value if isinstance(value, list) else value.splitlines() if isinstance(value, str) else []
+    values = [str(item or "").strip() for item in candidates]
+    while values and not values[-1]:
+        values.pop()
+    return values
+
+
+def _dashboard_is_secret_config_key(name: object) -> bool:
+    normalized = str(name or "").strip().lower().replace("-", "_")
+    if not normalized:
+        return False
+    # Environment variable names and already-safe status fields are metadata,
+    # rather than credentials.  Keep them visible in the dashboard projection.
+    if normalized.endswith(("_env", "_envs", "_masked", "_ready", "_configured")):
+        return False
+    if normalized in _SECRET_CONFIG_KEY_NAMES:
+        return True
+    return normalized.endswith(
+        ("_api_key", "_api_keys", "_token", "_password", "_secret", "_credential", "_authorization")
+    )
+
+
+def _dashboard_copy_config_value(value, field: str, *, depth: int = 0):
+    """Copy JSON-shaped config data while rejecting unclassified secrets."""
+    if depth > 8:
+        raise ValueError(f"{field} is nested too deeply")
+    if value is None or isinstance(value, (bool, int, str)):
+        if isinstance(value, str) and len(value) > _MAX_ENV_VALUE_CHARS:
+            raise ValueError(f"{field} is too long")
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{field} must be finite")
+        return value
+    if isinstance(value, Mapping):
+        result: dict[str, object] = {}
+        for key, child in value.items():
+            key_name = str(key)
+            if _dashboard_is_secret_config_key(key_name):
+                raise ValueError(f"{field}.{key_name} must not contain plaintext secrets")
+            result[key_name] = _dashboard_copy_config_value(
+                child, f"{field}.{key_name}", depth=depth + 1
+            )
+        return result
+    if isinstance(value, (list, tuple)):
+        if len(value) > 1000:
+            raise ValueError(f"{field} has too many items")
+        return [
+            _dashboard_copy_config_value(child, f"{field}[{index}]", depth=depth + 1)
+            for index, child in enumerate(value)
+        ]
+    raise ValueError(f"{field} must contain JSON-compatible values")
+
+
+def _dashboard_redact_config_value(value, *, depth: int = 0):
+    """Return a JSON-safe view with every secret-like field removed."""
+    if depth > 8:
+        return None
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, Mapping):
+        result: dict[str, object] = {}
+        for key, child in value.items():
+            key_name = str(key)
+            if _dashboard_is_secret_config_key(key_name):
+                continue
+            redacted = _dashboard_redact_config_value(child, depth=depth + 1)
+            if redacted is not None or child is None:
+                result[key_name] = redacted
+        return result
+    if isinstance(value, (list, tuple)):
+        return [
+            _dashboard_redact_config_value(child, depth=depth + 1)
+            for child in value[:1000]
+        ]
+    return None
+
+
+def _dashboard_secret_input(value: object, field: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    secret = value.strip()
+    if len(secret) > _MAX_PROVIDER_KEY_CHARS:
+        raise ValueError(f"{field} is too long")
+    if any(char in secret for char in ("\r", "\n", "\x00")):
+        raise ValueError(f"{field} contains invalid control characters")
+    if secret == "***" or _MASKED_SECRET_RE.fullmatch(secret):
+        raise ValueError(f"{field} must contain the actual key, not a masked value")
+    return secret
+
+
+def _dashboard_read_env_value(name: str) -> str:
+    reader = getattr(sh, "_read_env_var", None)
+    if callable(reader):
+        try:
+            return str(reader(name) or "").strip()
+        except Exception:
+            pass
+    return str(os.environ.get(name, "") or "").strip()
+
+
+def _dashboard_inline_key_count(value) -> int:
+    if isinstance(value, str):
+        values = value.split(",")
+    elif isinstance(value, list):
+        values = value
+    else:
+        values = []
+    count = 0
+    for item in values:
+        if isinstance(item, Mapping):
+            item = item.get("api_key") or item.get("key")
+        if str(item or "").strip():
+            count += 1
+    return count
+
+
+def _dashboard_sanitize_env_names(value) -> list[str]:
+    names = _dashboard_split_names(value)
+    for name in names:
+        if not _ENV_NAME_RE.fullmatch(name):
+            raise ValueError(f'invalid api key env name "{name}"')
+    return names
+
+
+def _dashboard_sanitize_upstream_models(raw_models) -> list:
+    raw_items = [item.strip() for item in raw_models.split(",")] if isinstance(raw_models, str) else raw_models if isinstance(raw_models, list) else []
+    models: list = []
+    seen: set[str] = set()
+    for item in raw_items:
+        if isinstance(item, dict):
+            public = str(item.get("id") or item.get("alias") or item.get("name") or item.get("model") or item.get("upstream_model") or "").strip()
+            upstream = str(item.get("upstream_model") or item.get("provider_model") or item.get("target_model") or item.get("model") or public).strip()
+            safe_item = _dashboard_copy_config_value(item, "gateway.upstreams.models[]")
+            if not isinstance(safe_item, dict):
+                safe_item = {}
+            safe_item["id"] = public
+            if upstream and upstream != public:
+                safe_item["upstream_model"] = upstream
+            else:
+                safe_item.pop("upstream_model", None)
+        else:
+            public = str(item or "").strip()
+            upstream = public
+            safe_item = public
+        if not public or public in seen:
+            continue
+        if len(public) > _MAX_PROVIDER_URL_CHARS or len(upstream) > _MAX_PROVIDER_URL_CHARS:
+            raise ValueError("gateway.upstreams.models entries are too long")
+        seen.add(public)
+        models.append(safe_item)
+    return models
+
+
+def _dashboard_normalize_upstream_protocol(value) -> str:
+    return "anthropic" if str(value or "openai").strip().lower() in {"anthropic", "claude"} else "openai"
+
+
+def _dashboard_copy_existing_upstream(existing: Mapping[str, object]) -> dict:
+    """Preserve stored settings; only the GET projection should redact them."""
+    result = copy.deepcopy(dict(existing))
+    result.pop("api_key_values", None)
+    return result
+
+
+def _dashboard_merge_config_patch(current: dict, patch: Mapping) -> None:
+    for key, value in patch.items():
+        if isinstance(value, Mapping) and isinstance(current.get(key), dict):
+            _dashboard_merge_config_patch(current[key], value)
+        else:
+            current[key] = copy.deepcopy(value)
+
+
+def _dashboard_upstream_clear_inline_keys(raw: Mapping[str, object]) -> bool:
+    if raw.get("clear_api_key") is True:
+        return True
+    # An explicitly supplied empty api_keys array is the unambiguous clear
+    # operation.  A blank api_key field remains the dashboard's "leave unchanged"
+    # value, matching the extended settings form.
+    if "api_keys" in raw and isinstance(raw.get("api_keys"), (list, tuple)) and _dashboard_inline_key_count(raw.get("api_keys")) == 0:
+        return True
+    return False
+
+
+def _dashboard_sanitize_gateway_upstreams(
+    raw_upstreams, current_upstreams=None
+) -> list[dict]:
+    if not isinstance(raw_upstreams, list):
+        raise ValueError("gateway.upstreams must be a list")
+    current_items = current_upstreams if isinstance(current_upstreams, list) else []
+    current_by_name = {
+        str(item.get("name") or "").strip(): item
+        for item in current_items
+        if isinstance(item, Mapping) and str(item.get("name") or "").strip()
+    }
+    result: list[dict] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(raw_upstreams, 1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"gateway.upstreams[{index - 1}] must be an object")
+        raw_name = str(raw.get("name") or "").strip()
+        name = raw_name or f"upstream-{index}"
+        if name in seen:
+            raise ValueError(f'duplicate gateway upstream name "{name}"')
+        seen.add(name)
+        existing = current_by_name.get(name)
+        if existing is None and not raw_name and index <= len(current_items):
+            candidate = current_items[index - 1]
+            existing = candidate if isinstance(candidate, Mapping) and not candidate.get("name") else None
+        item = _dashboard_copy_existing_upstream(existing) if existing else {}
+        item["name"] = name
+
+        if "protocol" in raw or "api_format" in raw or "type" in raw:
+            item["protocol"] = _dashboard_normalize_upstream_protocol(
+                raw.get("protocol") or raw.get("api_format") or raw.get("type")
+            )
+        else:
+            item.setdefault("protocol", "openai")
+        if "base_url" in raw:
+            base_url = str(raw.get("base_url") or "").strip().rstrip("/")
+            if len(base_url) > _MAX_PROVIDER_URL_CHARS:
+                raise ValueError(f"gateway.upstreams[{index - 1}].base_url is too long")
+            item["base_url"] = base_url
+        else:
+            item.setdefault("base_url", "")
+
+        env_names: list[str] = []
+        if "api_key_envs" in raw or "api_key_env" in raw:
+            env_value = raw.get("api_key_envs", raw.get("api_key_env", []))
+            env_names = _dashboard_sanitize_env_names(env_value)
+            item.pop("api_key_env", None)
+            item.pop("api_key_envs", None)
+            if "api_key_envs" in raw:
+                if env_names:
+                    item["api_key_envs"] = env_names
+            elif env_names:
+                item["api_key_env"] = (
+                    env_names[0] if len(env_names) == 1 else ",".join(env_names)
+                )
+        else:
+            env_names = _dashboard_sanitize_env_names(
+                item.get("api_key_envs", item.get("api_key_env", []))
+            )
+
+        handled = {
+            "name", "protocol", "api_format", "type", "base_url",
+            "api_key", "api_keys", "api_key_values", "api_key_env", "api_key_envs",
+            "clear_api_key",
+            "models", "default_model", "prompt_cache", "prompt_cache_retention",
+            "anthropic_version", "anthropic_beta",
+        }
+        for key in (
+            "default_model", "prompt_cache", "prompt_cache_retention",
+            "anthropic_version", "anthropic_beta",
+        ):
+            if key in raw:
+                value = str(raw.get(key) or "").strip()
+                if len(value) > _MAX_PROVIDER_FORMAT_CHARS:
+                    raise ValueError(f"gateway.upstreams[{index - 1}].{key} is too long")
+                if value:
+                    item[key] = value
+                else:
+                    item.pop(key, None)
+        if "models" in raw:
+            models = _dashboard_sanitize_upstream_models(raw.get("models", []))
+            item["models"] = models
+        for key, value in raw.items():
+            key_name = str(key)
+            if key_name in handled:
+                continue
+            if _dashboard_is_secret_config_key(key_name):
+                raise ValueError(
+                    f"gateway.upstreams[{index - 1}].{key_name} must not contain plaintext secrets"
+                )
+            _dashboard_merge_config_patch(item, {key_name: _dashboard_copy_config_value(
+                value, f"gateway.upstreams[{index - 1}].{key_name}"
+            )})
+
+        if "api_key" in raw:
+            secret = _dashboard_secret_input(
+                raw.get("api_key"), f"gateway.upstreams[{index - 1}].api_key"
+            )
+            if secret:
+                raise ValueError(
+                    f"gateway.upstreams[{index - 1}].api_key must use api_key_env and api_key_values"
+                )
+            if raw.get("clear_api_key") is True:
+                item.pop("api_key", None)
+                item.pop("api_keys", None)
+        if "clear_api_key" in raw and raw.get("clear_api_key") is not True:
+            raise ValueError(
+                f"gateway.upstreams[{index - 1}].clear_api_key must be true or omitted"
+            )
+        if _dashboard_upstream_clear_inline_keys(raw):
+            item.pop("api_key", None)
+            item.pop("api_keys", None)
+        if "api_keys" in raw:
+            if _dashboard_inline_key_count(raw.get("api_keys")):
+                raise ValueError(
+                    f"gateway.upstreams[{index - 1}].api_keys must use api_key_envs and api_key_values"
+                )
+            if _dashboard_upstream_clear_inline_keys(raw):
+                item.pop("api_key", None)
+                item.pop("api_keys", None)
+
+        values = _dashboard_api_key_values(raw.get("api_key_values", []))
+        if values and not env_names:
+            raise ValueError(
+                f'gateway upstream "{name}" has api key values without matching env names'
+            )
+        if any(value for value in values):
+            # A newly supplied env-backed key supersedes an old inline key.  The
+            # actual value is written to .env and sent to the Gateway hot path.
+            item.pop("api_key", None)
+            item.pop("api_keys", None)
+        result.append(item)
+    return result
+
+
+def _dashboard_gateway_upstream_env_updates(raw_upstreams, config_upstreams) -> dict[str, str]:
+    updates: dict[str, str] = {}
+    for raw, configured in zip(raw_upstreams or [], config_upstreams):
+        env_names = _dashboard_sanitize_env_names(configured.get("api_key_envs", configured.get("api_key_env", [])))
+        values = _dashboard_api_key_values(raw.get("api_key_values", []))
+        if len(values) > len(env_names):
+            raise ValueError(f'gateway upstream "{str(raw.get("name") or "upstream").strip()}" has api key values without matching env names')
+        for index, value in enumerate(values):
+            if not value:
+                continue
+            secret = _dashboard_secret_input(
+                value,
+                f'gateway upstream "{str(raw.get("name") or "upstream").strip()}" api_key_values[{index}]',
+            )
+            env_name = env_names[index]
+            previous = updates.get(env_name)
+            if previous is not None and previous != secret:
+                raise ValueError(f'conflicting values supplied for API key env "{env_name}"')
+            updates[env_name] = secret
+    return updates
+
+
+def _dashboard_gateway_hot_upstreams(config_upstreams: list[dict], raw_upstreams, env_updates: dict[str, str]) -> list[dict]:
+    result = []
+    for item, raw in zip(config_upstreams, raw_upstreams or []):
+        hot_item = dict(item)
+        env_names = _dashboard_sanitize_env_names(item.get("api_key_envs", item.get("api_key_env", [])))
+        if set(env_names).intersection(env_updates):
+            # Gateway is a separate process with a stale environment. Send the
+            # complete pool and suppress its old env/inline fallback for this reload.
+            hot_item["api_key"] = ""
+            hot_item["api_keys"] = [
+                {"api_key": value, "label": f"env:{name}"}
+                for name in env_names
+                if (value := env_updates.get(name, _dashboard_read_env_value(name)))
+            ]
+            hot_item.pop("api_key_env", None)
+            hot_item.pop("api_key_envs", None)
+        elif _dashboard_upstream_clear_inline_keys(raw):
+            hot_item["api_key"] = ""
+            hot_item["api_keys"] = []
+        result.append(hot_item)
+    return result
+
+
+def _dashboard_gateway_upstreams_payload(gateway_cfg: dict) -> list[dict]:
+    payload: list[dict] = []
+    raw_upstreams = gateway_cfg.get("upstreams", [])
+    if not isinstance(raw_upstreams, list):
+        return payload
+    for raw in raw_upstreams:
+        if not isinstance(raw, dict):
+            continue
+        env_names = _dashboard_split_names(raw.get("api_key_envs", raw.get("api_key_env", [])))
+        direct = int(bool(str(raw.get("api_key") or "").strip()))
+        direct += _dashboard_inline_key_count(raw.get("api_keys", []))
+        configured_envs = [name for name in env_names if _dashboard_read_env_value(name)]
+        key_count = direct + len(configured_envs)
+        safe = _dashboard_redact_config_value(raw)
+        if not isinstance(safe, dict):
+            safe = {}
+        safe.update({
+            "name": str(raw.get("name") or "").strip(),
+            "protocol": _dashboard_normalize_upstream_protocol(raw.get("protocol")),
+            "base_url": str(raw.get("base_url") or "").strip(),
+            "api_key_envs": env_names,
+            "api_key_masked": ["***"] * key_count,
+            "key_count": key_count,
+            "ready": bool(str(raw.get("base_url") or "").strip() and key_count),
+            "default_model": str(raw.get("default_model") or "").strip(),
+            "prompt_cache": str(raw.get("prompt_cache") or "").strip(),
+            "prompt_cache_retention": str(raw.get("prompt_cache_retention") or "").strip(),
+            "anthropic_version": str(raw.get("anthropic_version") or "").strip(),
+            "anthropic_beta": str(raw.get("anthropic_beta") or "").strip(),
+            "models": _dashboard_sanitize_upstream_models(raw.get("models", [])),
+        })
+        safe.pop("api_key", None)
+        safe.pop("api_keys", None)
+        safe.pop("api_key_values", None)
+        payload.append(safe)
+    return payload
+
+
+def _sanitize_rule_value(value, field: str, rule: tuple):
+    kind = rule[0]
+    if kind == "bool":
+        return _parse_bool(value)
+    if kind == "int":
+        return _bounded_config_int(value, field, rule[1], rule[2])
+    if kind == "float":
+        return _bounded_config_float(value, field, rule[1], rule[2])
+    if kind == "choice":
+        parsed = str(value or "").strip().lower()
+        if parsed not in rule[1]:
+            raise ValueError(f"{field} must be one of {sorted(rule[1])}")
+        return parsed
+    parsed = str(value or "").strip()
+    if len(parsed) > _MAX_PROVIDER_URL_CHARS:
+        raise ValueError(f"{field} is too long")
+    return parsed
+
+
+def _sanitize_extended_config_payload(body: dict, current_config: Mapping[str, object], persist_env: bool):
+    sections: dict[str, dict] = {}
+    env_updates: dict[str, str] = {}
+    gateway_hot: dict[str, dict] = {}
+    restart_sections: list[str] = []
+    for name in _EXTENDED_CONFIG_SECTIONS:
+        if name in body and not isinstance(body.get(name), dict):
+            raise ValueError(f"{name} must be an object")
+
+    if "gateway" in body:
+        raw = dict(body["gateway"])
+        clean: dict = {}
+        for key in _GATEWAY_BOOL_FIELDS:
+            if key in raw:
+                clean[key] = _parse_bool(raw[key])
+        for key, bounds in _GATEWAY_INT_FIELDS.items():
+            if key in raw:
+                clean[key] = _bounded_config_int(raw[key], f"gateway.{key}", *bounds)
+        for key, bounds in _GATEWAY_FLOAT_FIELDS.items():
+            if key in raw:
+                clean[key] = _bounded_config_float(raw[key], f"gateway.{key}", *bounds)
+        for key in _GATEWAY_STRING_FIELDS:
+            if key in raw:
+                clean[key] = _sanitize_rule_value(raw[key], f"gateway.{key}", ("str",))
+        for key, choices in _GATEWAY_CHOICES.items():
+            if key in raw:
+                clean[key] = _sanitize_rule_value(raw[key], f"gateway.{key}", ("choice", choices))
+        raw_upstreams = raw.get("upstreams")
+        if "upstreams" in raw:
+            current_gateway = _config_section(current_config, "gateway")
+            clean["upstreams"] = _dashboard_sanitize_gateway_upstreams(
+                raw_upstreams, current_gateway.get("upstreams", [])
+            )
+            upstream_env = _dashboard_gateway_upstream_env_updates(raw_upstreams, clean["upstreams"])
+            env_updates.update(upstream_env)
+        if "domain_sentinel_api_key" in raw:
+            secret = _dashboard_secret_input(
+                raw["domain_sentinel_api_key"], "gateway.domain_sentinel_api_key"
+            )
+            if secret:
+                env_updates[_GATEWAY_SECRET_ENV] = secret
+        handled_gateway = set(_GATEWAY_BOOL_FIELDS)
+        handled_gateway.update(_GATEWAY_INT_FIELDS)
+        handled_gateway.update(_GATEWAY_FLOAT_FIELDS)
+        handled_gateway.update(_GATEWAY_STRING_FIELDS)
+        handled_gateway.update(_GATEWAY_CHOICES)
+        handled_gateway.update({"upstreams", "domain_sentinel_api_key"})
+        for key, value in raw.items():
+            if key in handled_gateway:
+                continue
+            if _dashboard_is_secret_config_key(key):
+                raise ValueError(f"gateway.{key} must not contain plaintext secrets")
+            clean[key] = _dashboard_copy_config_value(value, f"gateway.{key}")
+        sections["gateway"] = clean
+        hot = copy.deepcopy(clean)
+        if "upstreams" in clean:
+            hot["upstreams"] = _dashboard_gateway_hot_upstreams(clean["upstreams"], raw_upstreams, env_updates)
+        if _GATEWAY_SECRET_ENV in env_updates:
+            hot["domain_sentinel_api_key"] = env_updates[_GATEWAY_SECRET_ENV]
+        gateway_hot["gateway"] = hot
+
+    for name, rules in _SECTION_RULES.items():
+        if name not in body:
+            continue
+        raw = body[name]
+        clean = {key: _sanitize_rule_value(raw[key], f"{name}.{key}", rule) for key, rule in rules.items() if key in raw}
+        if name in _SECRET_ENV_BY_SECTION and "api_key" in raw:
+            secret = _dashboard_secret_input(raw["api_key"], f"{name}.api_key")
+            if secret:
+                env_updates[_SECRET_ENV_BY_SECTION[name]] = secret
+        if name in _SECRET_ENV_BY_SECTION and "clear_api_key" in raw:
+            if raw["clear_api_key"] is not True:
+                raise ValueError(f"{name}.clear_api_key must be true or omitted")
+            env_updates[_SECRET_ENV_BY_SECTION[name]] = ""
+        for key, value in raw.items():
+            if key in rules or key in {"api_key", "clear_api_key"}:
+                continue
+            if _dashboard_is_secret_config_key(key):
+                raise ValueError(f"{name}.{key} must not contain plaintext secrets")
+            clean[key] = _dashboard_copy_config_value(value, f"{name}.{key}")
+        sections[name] = clean
+        if name in {"memory_diffusion", "reranker", "persona", "dream"}:
+            hot = copy.deepcopy(clean)
+            env_name = _SECRET_ENV_BY_SECTION.get(name)
+            if env_name and env_name in env_updates:
+                hot["api_key"] = env_updates[env_name]
+            gateway_hot[name] = hot
+        elif name in {"recall", "reflection", "portrait", "self_anchor"}:
+            restart_sections.append(name)
+
+    if env_updates and not persist_env:
+        raise ValueError("plaintext API keys require persist_env=true")
+    return sections, env_updates, gateway_hot, restart_sections
+
+
+def _dashboard_collect_model_api_key_updates(
+    body: Mapping[str, object], env_updates: dict[str, str], persist_env: bool
+) -> None:
+    """Route top-level model keys through the same persistent env transaction."""
+    for section_name, env_name in _MODEL_API_KEY_ENV.items():
+        raw = body.get(section_name)
+        if not isinstance(raw, Mapping):
+            continue
+        if "api_key" in raw:
+            secret = _dashboard_secret_input(raw["api_key"], f"{section_name}.api_key")
+            if secret:
+                env_updates[env_name] = secret
+        if "clear_api_key" in raw:
+            if raw["clear_api_key"] is not True:
+                raise ValueError(f"{section_name}.clear_api_key must be true or omitted")
+            env_updates[env_name] = ""
+    if env_updates and not persist_env:
+        # The caller may have only supplied non-secret extended fields.  Only
+        # model keys added here need the explicit env persistence opt-in.
+        model_key_names = set(_MODEL_API_KEY_ENV.values())
+        if model_key_names.intersection(env_updates):
+            raise ValueError("plaintext API keys require persist_env=true")
+
+
+def _dashboard_inline_secret_clear_required(
+    body: Mapping[str, object], current_config: Mapping[str, object]
+) -> bool:
+    """Detect a clear that would otherwise resurrect from YAML on restart."""
+    for section_name in (*_MODEL_API_KEY_ENV, *_SECRET_ENV_BY_SECTION):
+        raw = body.get(section_name)
+        if not isinstance(raw, Mapping) or raw.get("clear_api_key") is not True:
+            continue
+        previous = _config_section(current_config, section_name)
+        if str(previous.get("api_key") or "").strip():
+            return True
+
+    gateway = body.get("gateway")
+    if isinstance(gateway, Mapping):
+        previous_gateway = _config_section(current_config, "gateway")
+        previous_upstreams = previous_gateway.get("upstreams", [])
+        previous_by_name = {
+            str(item.get("name") or "").strip(): item
+            for item in previous_upstreams
+            if isinstance(item, Mapping)
+        }
+        raw_upstreams = gateway.get("upstreams")
+        if isinstance(raw_upstreams, list):
+            for index, raw in enumerate(raw_upstreams):
+                if not isinstance(raw, Mapping) or not _dashboard_upstream_clear_inline_keys(raw):
+                    continue
+                name = str(raw.get("name") or f"upstream-{index + 1}").strip()
+                previous = previous_by_name.get(name)
+                if previous is None and not raw.get("name") and index < len(previous_upstreams):
+                    candidate = previous_upstreams[index]
+                    previous = candidate if isinstance(candidate, Mapping) and not candidate.get("name") else None
+                if previous and (
+                    str(previous.get("api_key") or "").strip()
+                    or _dashboard_inline_key_count(previous.get("api_keys"))
+                ):
+                    return True
+    return False
+
+
+def _extended_config_get_payload(config: Mapping[str, object]) -> dict:
+    result: dict[str, dict] = {}
+    raw_gateway = _config_section(config, "gateway")
+    gateway = _dashboard_redact_config_value(raw_gateway)
+    if not isinstance(gateway, dict):
+        gateway = {}
+    gateway.pop("domain_sentinel_api_key", None)
+    gateway["upstreams"] = _dashboard_gateway_upstreams_payload(raw_gateway)
+    gateway_secret = _dashboard_read_env_value(_GATEWAY_SECRET_ENV) or str(
+        raw_gateway.get("domain_sentinel_api_key") or ""
+    ).strip()
+    gateway["domain_sentinel_api_key_masked"] = _mask_secret(gateway_secret)
+    gateway["domain_sentinel_api_ready"] = bool(gateway_secret and gateway.get("domain_sentinel_base_url"))
+    result["gateway"] = gateway
+    for name in _EXTENDED_CONFIG_SECTIONS[1:]:
+        raw_section = _config_section(config, name)
+        section = _dashboard_redact_config_value(raw_section)
+        if not isinstance(section, dict):
+            section = {}
+        secret_env = _SECRET_ENV_BY_SECTION.get(name)
+        if secret_env:
+            stored_secret = str(raw_section.get("api_key", "") or "").strip()
+            fallback_sections = {
+                "reranker": ("embedding", "dehydration"),
+                "persona": ("dehydration",),
+                "dream": (),
+                "reflection": ("embedding", "persona", "dehydration"),
+                "portrait": ("dehydration", "reflection", "persona"),
+            }.get(name, ())
+            candidates = [_dashboard_read_env_value(secret_env), stored_secret]
+            for fallback_name in fallback_sections:
+                fallback_section = _config_section(config, fallback_name)
+                candidates.append(str(fallback_section.get("api_key") or "").strip())
+            for fallback_env in (
+                "OMBRE_EMBED_API_KEY",
+                "OMBRE_EMBEDDING_API_KEY",
+                "OMBRE_COMPRESS_API_KEY",
+                "OMBRE_API_KEY",
+            ):
+                if fallback_env != secret_env:
+                    candidates.append(_dashboard_read_env_value(fallback_env))
+            secret = next((candidate for candidate in candidates if candidate), "")
+            section["api_key_masked"] = _mask_secret(secret)
+            section["api_ready"] = bool(secret)
+        result[name] = section
+    return result
+
+
+async def _hot_update_gateway_config(gateway_payload: dict) -> str | None:
+    if not gateway_payload:
+        return None
+    admin_url = os.environ.get("OMBRE_GATEWAY_ADMIN_URL", "").strip()
+    token = os.environ.get("OMBRE_GATEWAY_TOKEN", "").strip()
+    if not admin_url or not token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.post(admin_url, headers={"Authorization": f"Bearer {token}"}, json=gateway_payload)
+        if response.status_code >= 400:
+            return f"gateway_hot_reload_failed:{response.status_code}"
+        return "gateway_hot_reloaded"
+    except Exception as exc:
+        logger.warning("Gateway hot config update failed: %s", type(exc).__name__)
+        return f"gateway_hot_reload_failed:{type(exc).__name__}"
+
+def _dashboard_env_snapshot() -> tuple[str, bool, bytes | None]:
+    path = sh._project_env_path()
+    exists = os.path.exists(path)
+    if not exists:
+        return path, False, None
+    # Snapshot failures must abort before mutating runtime/YAML state; silently
+    # returning an unusable snapshot would make a later rollback incomplete.
+    with open(path, "rb") as handle:
+        return path, True, handle.read()
+
+
+def _dashboard_restore_env(snapshot: tuple[str, bool, bytes | None]) -> None:
+    path, existed, content = snapshot
+    if existed and content is not None:
+        current = None
+        if os.path.exists(path):
+            with open(path, "rb") as handle:
+                current = handle.read()
+        if current != content:
+            _dashboard_atomic_write_env(path, content, current)
+    elif not existed:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
+def _dashboard_encode_env_value(value: str) -> str:
+    """Encode one value using the syntax understood by ``env_loader``."""
+    if not value or not any(char.isspace() or char in "#\\\"" for char in value):
+        return value
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _dashboard_atomic_write_env(path: str, content: bytes, previous: bytes | None) -> None:
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{os.path.basename(path)}.tmp.", dir=parent
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.replace(temporary, path)
+            temporary = ""
+        except OSError as exc:
+            # A few container deployments bind-mount the env file itself.  Such
+            # an inode cannot be renamed, so retain a rollback copy and update it
+            # in place only for that specific filesystem error.
+            if exc.errno != errno.EBUSY or not os.path.isfile(path):
+                raise
+            with open(path, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            with open(path, "rb") as handle:
+                written_content = handle.read()
+            if written_content != content:
+                raise OSError(".env verification failed after write")
+        with open(path, "rb") as handle:
+            written_content = handle.read()
+        if written_content != content:
+            raise OSError(".env verification failed after write")
+    except Exception:
+        # ``os.replace`` leaves the old file untouched on ordinary failures.  The
+        # in-place bind-mount fallback needs explicit restoration.
+        if previous is not None and os.path.isfile(path):
+            try:
+                with open(path, "wb") as handle:
+                    handle.write(previous)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except Exception:
+                pass
+        elif previous is None:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+        raise
+    finally:
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
+
+def _dashboard_write_env_updates(updates: Mapping[str, str]) -> list[str]:
+    if not updates:
+        return []
+    path = sh._project_env_path()
+    existed = os.path.exists(path)
+    previous = None
+    if existed:
+        with open(path, "rb") as handle:
+            previous = handle.read()
+        text = previous.decode("utf-8")
+    else:
+        text = ""
+
+    lines = text.splitlines(keepends=True)
+    for name, value in updates.items():
+        if not _ENV_NAME_RE.fullmatch(str(name)):
+            raise ValueError(f'invalid api key env name "{name}"')
+        if not isinstance(value, str):
+            raise ValueError(f"environment value for {name} must be a string")
+        encoded = _dashboard_encode_env_value(value)
+        replacement = f"{name}={encoded}\n"
+        replaced = False
+        for index, line in enumerate(lines):
+            match = re.match(
+                r"^(\s*)(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=.*(?:\r?\n)?$",
+                line,
+            )
+            if match and match.group(3) == name:
+                prefix = f"{match.group(1)}{match.group(2) or ''}"
+                lines[index] = f"{prefix}{replacement}"
+                replaced = True
+        if not replaced:
+            if lines and not lines[-1].endswith(("\n", "\r")):
+                lines[-1] += "\n"
+            lines.append(replacement)
+
+    content = "".join(lines).encode("utf-8")
+    old_environment = {name: os.environ.get(name) for name in updates}
+    _dashboard_atomic_write_env(path, content, previous)
+    try:
+        for name, value in updates.items():
+            if value:
+                os.environ[name] = value
+            else:
+                os.environ.pop(name, None)
+    except Exception:
+        _dashboard_restore_env((path, existed, previous))
+        for name, value in old_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        raise
+    return [f"env.{name}" for name in updates]
 
 
 def _rebuild_embedding_runtime():
@@ -146,6 +1160,7 @@ def register(mcp) -> None:
     # 该锁只保护本次路由注册实例，不绑定 asyncio 事件循环；这样同一处理器
     # 被测试客户端从多个事件循环调用时，也能串行提交而不会触发跨循环错误。
     mcp_token_commit_lock = threading.Lock()
+    config_commit_lock = _CrossLoopAsyncLock()
 
     # MCP 鉴权在进程启动时绑定到中间件和 OAuth 路由可见性。有效值与期望持久值
     # 必须分开，避免 Dashboard 错称启动期切换已经热生效。
@@ -255,8 +1270,7 @@ def register(mcp) -> None:
         return JSONResponse({"vars": vars_data})
 
 
-    @mcp.custom_route("/api/config", methods=["GET"])
-    async def api_config_get(request: Request) -> Response:
+    async def _api_config_get_locked(request: Request) -> Response:
         """Get current runtime config (safe fields only, API key masked)."""
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
@@ -264,10 +1278,10 @@ def register(mcp) -> None:
             return err
         try:
             desired = _desired_startup_state(read_config_yaml())
-        except (OSError, ValueError) as exc:
-            logger.error("读取持久化启动配置失败: %s", exc)
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            logger.error("persisted config read failed: err_type=%s", type(exc).__name__)
             return JSONResponse(
-                {"error": f"failed to read persisted config: {exc}"},
+                {"error": "failed to read persisted config"},
                 status_code=500,
             )
         dehy = sh.config.get("dehydration", {})
@@ -277,7 +1291,7 @@ def register(mcp) -> None:
         )
         api_key = dehy.get("api_key", "")
         masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else ("***" if api_key else "")
-        return JSONResponse({
+        payload = {
             "dehydration": {
                 "model": dehy.get("model", ""),
                 "base_url": dehy.get("base_url", ""),
@@ -345,11 +1359,18 @@ def register(mcp) -> None:
             # 前端顶部才显示归属徽标（单人不打扰）；owner_name 为徽标文字。均只读。
             "owner_name": _get_owner_name(),
             "owner_count": _get_owner_count(),
-        })
+        }
+        payload.update(_extended_config_get_payload(sh.config))
+        return JSONResponse(payload)
 
 
-    @mcp.custom_route("/api/config", methods=["POST"])
-    async def api_config_update(request: Request) -> Response:
+    @mcp.custom_route("/api/config", methods=["GET"])
+    async def api_config_get(request: Request) -> Response:
+        async with config_commit_lock:
+            return await _api_config_get_locked(request)
+
+
+    async def _api_config_update_locked(request: Request) -> Response:
         """Hot-update runtime sh.config. Optionally persist to config.yaml."""
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
@@ -365,6 +1386,15 @@ def register(mcp) -> None:
         updated = []
         try:
             persist_requested = _parse_bool(body.get("persist", False))
+            persist_env_requested = _parse_bool(body.get("persist_env", False))
+            (
+                extended_sections,
+                extended_env_updates,
+                extended_gateway_hot,
+                extended_restart_sections,
+            ) = _sanitize_extended_config_payload(
+                body, sh.config, persist_env_requested
+            )
             mcp_auth_value = (
                 _parse_bool(body["mcp_require_auth"])
                 if "mcp_require_auth" in body
@@ -392,6 +1422,13 @@ def register(mcp) -> None:
             if "surfacing" in body and not isinstance(body.get("surfacing"), dict):
                 return JSONResponse(
                     {"error": "surfacing must be an object"}, status_code=400
+                )
+            _dashboard_collect_model_api_key_updates(
+                body, extended_env_updates, persist_env_requested
+            )
+            if not persist_requested and _dashboard_inline_secret_clear_required(body, sh.config):
+                return JSONResponse(
+                    {"error": "clearing a stored inline API key requires persist=true"}, status_code=400
                 )
             dehydration_payload = dict(body.get("dehydration") or {})
             if "extra_body" in dehydration_payload and not isinstance(
@@ -580,6 +1617,7 @@ def register(mcp) -> None:
             "host_port",
             "surfacing",
             "timezone",
+            *_EXTENDED_CONFIG_SECTIONS,
         }
         if startup_setting_requested and hot_update_keys.intersection(body):
             return JSONResponse(
@@ -611,6 +1649,24 @@ def register(mcp) -> None:
                 }, status_code=400)
 
         runtime_config_before = copy.deepcopy(sh.config)
+        env_before = {name: os.environ.get(name) for name in extended_env_updates}
+        try:
+            env_snapshot = (
+                _dashboard_env_snapshot() if extended_env_updates else None
+            )
+        except OSError as exc:
+            logger.warning("extended env snapshot failed: err_type=%s", type(exc).__name__)
+            return JSONResponse(
+                {"error": "environment snapshot failed"}, status_code=500
+            )
+        # Publish the staged env view before rebuilding an engine.  EmbeddingEngine
+        # follows the same env-over-config priority as a fresh process, so a clear
+        # must remove the old process value before its replacement is constructed.
+        for name, value in extended_env_updates.items():
+            if value:
+                os.environ[name] = value
+            else:
+                os.environ.pop(name, None)
         embedding_before = sh.embedding_engine
         dehydrator_fields = (
             "model",
@@ -627,17 +1683,25 @@ def register(mcp) -> None:
         dehydrator_before = {
             field: getattr(sh.dehydrator, field)
             for field in dehydrator_fields
-            if hasattr(sh.dehydrator, field)
+            if sh.dehydrator is not None and hasattr(sh.dehydrator, field)
         }
 
         def _rollback_hot_runtime() -> None:
             """在验证或持久化失败时恢复同一份运行态快照。"""
             sh.config.clear()
             sh.config.update(copy.deepcopy(runtime_config_before))
-            for field, value in dehydrator_before.items():
-                setattr(sh.dehydrator, field, value)
+            if sh.dehydrator is not None:
+                for field, value in dehydrator_before.items():
+                    setattr(sh.dehydrator, field, value)
             if sh.embedding_engine is not embedding_before:
                 sh.replace_embedding_engine(embedding_before)
+            if env_snapshot is not None:
+                _dashboard_restore_env(env_snapshot)
+            for name, value in env_before.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
         # --- Dehydration config ---
         if "dehydration" in body:
@@ -647,10 +1711,21 @@ def register(mcp) -> None:
                 if key in d:
                     dehy[key] = d[key]
                     updated.append(f"dehydration.{key}")
-            if "api_key" in d and d["api_key"]:
-                dehy["api_key"] = d["api_key"]
+            if _MODEL_API_KEY_ENV["dehydration"] in extended_env_updates:
+                configured_key = extended_env_updates.get(
+                    _MODEL_API_KEY_ENV["dehydration"], ""
+                )
+                if configured_key:
+                    dehy["api_key"] = configured_key
+                else:
+                    dehy.pop("api_key", None)
                 updated.append("dehydration.api_key")
             # 热重载压缩器：同步所有属性，让 Dashboard 修改立即生效。
+            if sh.dehydrator is None:
+                _rollback_hot_runtime()
+                return JSONResponse(
+                    {"error": "dehydration runtime unavailable"}, status_code=400
+                )
             sh.dehydrator.model = dehy.get("model", sh.dehydrator.model)
             sh.dehydrator.base_url = dehy.get("base_url", sh.dehydrator.base_url)
             sh.dehydrator.max_tokens = int(dehy.get("max_tokens") or sh.dehydrator.max_tokens)
@@ -660,8 +1735,8 @@ def register(mcp) -> None:
             sh.dehydrator.timeout_seconds = _positive_float(dehy.get("timeout_seconds"), sh.dehydrator.timeout_seconds)
             sh.dehydrator.api_format = dehy.get("api_format", getattr(sh.dehydrator, "api_format", "openai_compat"))
             sh.dehydrator.extra_body = dict(dehy.get("extra_body") or {})
-            if "api_key" in d and d["api_key"]:
-                sh.dehydrator.api_key = dehy["api_key"]
+            if _MODEL_API_KEY_ENV["dehydration"] in extended_env_updates:
+                sh.dehydrator.api_key = dehy.get("api_key", "")
             sh.dehydrator.api_available = bool(sh.dehydrator.api_key)
             # 密钥或 URL 改变时重建 OpenAI 兼容客户端。
             if sh.dehydrator.api_available and sh.dehydrator.api_format == "openai_compat":
@@ -709,6 +1784,16 @@ def register(mcp) -> None:
             if "api_format" in e:
                 emb["api_format"] = str(e["api_format"]).strip()
                 updated.append("embedding.api_format")
+                rebuild_embedding = True
+            if _MODEL_API_KEY_ENV["embedding"] in extended_env_updates:
+                configured_key = extended_env_updates.get(
+                    _MODEL_API_KEY_ENV["embedding"], ""
+                )
+                if configured_key:
+                    emb["api_key"] = configured_key
+                else:
+                    emb.pop("api_key", None)
+                updated.append("embedding.api_key")
                 rebuild_embedding = True
             if embedding_backend is not None:
                 emb["backend"] = embedding_backend
@@ -761,6 +1846,48 @@ def register(mcp) -> None:
                 sf[key] = value
                 updated.append(f"surfacing.{key}")
 
+        # --- Extended Dashboard contract ---
+        # Store safe config fields in runtime; plaintext keys are runtime-only and
+        # are supplied through environment variables to the Gateway/engines.
+        for section_name, section_values in extended_sections.items():
+            runtime_section = sh.config.setdefault(section_name, {})
+            if not isinstance(runtime_section, dict):
+                runtime_section = {}
+                sh.config[section_name] = runtime_section
+            _dashboard_merge_config_patch(runtime_section, section_values)
+            for key, env_name in _SECRET_ENV_BY_SECTION.items():
+                if section_name == key and env_name in extended_env_updates:
+                    runtime_section["api_key"] = extended_env_updates[env_name]
+            if section_name == "gateway" and _GATEWAY_SECRET_ENV in extended_env_updates:
+                runtime_section["domain_sentinel_api_key"] = extended_env_updates[_GATEWAY_SECRET_ENV]
+            updated.extend(f"{section_name}.{key}" for key in section_values)
+            env_name = _SECRET_ENV_BY_SECTION.get(section_name)
+            if env_name and env_name in extended_env_updates:
+                updated.append(f"{section_name}.api_key")
+            if section_name == "gateway":
+                if _GATEWAY_SECRET_ENV in extended_env_updates:
+                    updated.append("gateway.domain_sentinel_api_key")
+                raw_gateway = body.get("gateway")
+                raw_upstreams = raw_gateway.get("upstreams", []) if isinstance(raw_gateway, dict) else []
+                upstream_env_names = {
+                    env_name
+                    for raw_upstream in raw_upstreams
+                    if isinstance(raw_upstream, dict)
+                    for env_name in _dashboard_sanitize_env_names(
+                        raw_upstream.get("api_key_envs", raw_upstream.get("api_key_env", []))
+                    )
+                }
+                if upstream_env_names.intersection(extended_env_updates):
+                    updated.append("gateway.upstreams.api_keys")
+
+        if extended_env_updates:
+            try:
+                updated.extend(_dashboard_write_env_updates(extended_env_updates))
+            except Exception as exc:
+                _rollback_hot_runtime()
+                logger.warning("extended env update failed: err_type=%s", type(exc).__name__)
+                return JSONResponse({"error": "environment persistence failed", "updated": []}, status_code=500)
+
         persisted_after: dict | None = None
 
         # --- Persist to config.yaml if requested ---
@@ -774,7 +1901,10 @@ def register(mcp) -> None:
                     for key in ("model", "base_url", "max_tokens", "temperature", "api_format", "timeout_seconds", "extra_body"):
                         if key in dehydration_payload:
                             sc_dehy[key] = dehydration_payload[key]
-                    # Never persist api_key to yaml (use env var)
+                    # Never persist a submitted api_key to YAML; the paired env
+                    # update above is the restart-visible source of truth.
+                    if _MODEL_API_KEY_ENV["dehydration"] in extended_env_updates:
+                        sc_dehy.pop("api_key", None)
 
                 if "embedding" in body:
                     sc_emb = save_config.setdefault("embedding", {})
@@ -788,6 +1918,8 @@ def register(mcp) -> None:
                         sc_emb["enabled"] = embedding_enabled
                     if embedding_backend is not None:
                         sc_emb["backend"] = embedding_backend
+                    if _MODEL_API_KEY_ENV["embedding"] in extended_env_updates:
+                        sc_emb.pop("api_key", None)
 
                 if merge_threshold_value is not None:
                     save_config["merge_threshold"] = merge_threshold_value
@@ -832,6 +1964,92 @@ def register(mcp) -> None:
                         for key, value in sampling_values.items():
                             sc_samp[key] = value
 
+                # Persist sanitized extended sections. New plaintext keys are written
+                # only to .env, but preserve legacy inline keys when this save did not
+                # replace them; otherwise changing an unrelated setting would silently
+                # break an existing deployment on its next restart.
+                for section_name, section_values in extended_sections.items():
+                    saved_section = save_config.setdefault(section_name, {})
+                    if not isinstance(saved_section, dict):
+                        saved_section = {}
+                        save_config[section_name] = saved_section
+                    previous_section = dict(saved_section)
+                    _dashboard_merge_config_patch(saved_section, section_values)
+                    section_env_name = _SECRET_ENV_BY_SECTION.get(section_name)
+                    section_secret_replaced = bool(section_env_name and section_env_name in extended_env_updates)
+                    if section_secret_replaced:
+                        saved_section.pop("api_key", None)
+                        saved_section.pop("api_keys", None)
+                    else:
+                        for secret_key in ("api_key", "api_keys"):
+                            if secret_key in previous_section:
+                                saved_section[secret_key] = copy.deepcopy(previous_section[secret_key])
+                    saved_section.pop("api_key_values", None)
+                    if section_name == "gateway":
+                        if _GATEWAY_SECRET_ENV in extended_env_updates:
+                            saved_section.pop("domain_sentinel_api_key", None)
+                        elif "domain_sentinel_api_key" in previous_section:
+                            saved_section["domain_sentinel_api_key"] = copy.deepcopy(previous_section["domain_sentinel_api_key"])
+                        previous_upstreams = previous_section.get("upstreams")
+                        previous_by_name = {
+                            str(item.get("name") or "").strip(): item
+                            for item in previous_upstreams
+                            if isinstance(item, dict) and str(item.get("name") or "").strip()
+                        } if isinstance(previous_upstreams, list) else {}
+                        raw_gateway = body.get("gateway")
+                        raw_upstreams = (
+                            raw_gateway.get("upstreams", [])
+                            if isinstance(raw_gateway, dict)
+                            else []
+                        )
+                        raw_upstreams_by_name = {
+                            str(item.get("name") or "").strip(): item
+                            for item in raw_upstreams
+                            if isinstance(item, dict)
+                            and str(item.get("name") or "").strip()
+                        } if isinstance(raw_upstreams, list) else {}
+                        if isinstance(saved_section.get("upstreams"), list):
+                            for upstream_index, saved_upstream in enumerate(saved_section["upstreams"]):
+                                if not isinstance(saved_upstream, dict):
+                                    continue
+                                previous_upstream = previous_by_name.get(str(saved_upstream.get("name") or "").strip())
+                                if previous_upstream is None and isinstance(previous_upstreams, list) and upstream_index < len(previous_upstreams) and isinstance(previous_upstreams[upstream_index], dict):
+                                    candidate = previous_upstreams[upstream_index]
+                                    if not candidate.get("name") and saved_upstream.get("name") == f"upstream-{upstream_index + 1}":
+                                        previous_upstream = candidate
+                                previous_upstream = previous_upstream or {}
+                                env_names = _dashboard_sanitize_env_names(saved_upstream.get("api_key_envs", saved_upstream.get("api_key_env", [])))
+                                raw_upstream = raw_upstreams_by_name.get(
+                                    str(saved_upstream.get("name") or "").strip()
+                                )
+                                if raw_upstream is None and isinstance(raw_upstreams, list) and upstream_index < len(raw_upstreams) and isinstance(raw_upstreams[upstream_index], dict):
+                                    raw_upstream = raw_upstreams[upstream_index]
+                                upstream_secret_replaced = bool(
+                                    set(env_names).intersection(extended_env_updates)
+                                )
+                                inline_secret_cleared = bool(
+                                    raw_upstream
+                                    and _dashboard_upstream_clear_inline_keys(raw_upstream)
+                                )
+                                if upstream_secret_replaced or inline_secret_cleared:
+                                    saved_upstream.pop("api_key", None)
+                                    saved_upstream.pop("api_keys", None)
+                                else:
+                                    for secret_key in ("api_key", "api_keys"):
+                                        if secret_key in previous_upstream:
+                                            saved_upstream[secret_key] = copy.deepcopy(previous_upstream[secret_key])
+                                saved_upstream.pop("api_key_values", None)
+
+                for section_name, env_name in _MODEL_API_KEY_ENV.items():
+                    raw_section = body.get(section_name)
+                    if not isinstance(raw_section, dict) or env_name not in extended_env_updates:
+                        continue
+                    saved_section = save_config.setdefault(section_name, {})
+                    if not isinstance(saved_section, dict):
+                        saved_section = {}
+                        save_config[section_name] = saved_section
+                    saved_section.pop("api_key", None)
+
                 if deployment_public_url is not None:
                     sc_deployment = save_config.get("deployment")
                     if not isinstance(sc_deployment, dict):
@@ -865,6 +2083,32 @@ def register(mcp) -> None:
                     status_code=500,
                 )
 
+        # Persist first, then ask the separately running Gateway to reload. A missing
+        # admin channel is reported as a warning rather than a false success.
+        warnings: list[str] = []
+        if extended_gateway_hot:
+            hot_status = await _hot_update_gateway_config(extended_gateway_hot)
+            if hot_status == "gateway_hot_reloaded":
+                updated.append(hot_status)
+            elif hot_status:
+                warnings.append(hot_status)
+            else:
+                warnings.append(
+                    (
+                        "Gateway 热更新未执行：未配置 OMBRE_GATEWAY_ADMIN_URL/OMBRE_GATEWAY_TOKEN；"
+                        + (
+                            "已持久化配置将在 Gateway 重启后生效。"
+                            if persist_requested
+                            else "本次只更新了 Dashboard 当前运行态，Gateway 未同步。"
+                        )
+                    )
+                )
+        if extended_restart_sections:
+            warnings.append(
+                "以下配置已保存，但当前进程没有安全的完整重建入口，需要重启后生效："
+                + ", ".join(extended_restart_sections)
+            )
+
         desired = _desired_startup_state(
             persisted_after if persisted_after is not None else sh.config
         )
@@ -876,7 +2120,7 @@ def register(mcp) -> None:
             and runtime_network_security.get("auth_environment_value")
             != desired["mcp_require_auth"]
         )
-        restart_required = (
+        restart_required = bool(extended_restart_sections) or (
             (
                 desired["mcp_require_auth"] != runtime_mcp_auth_required
                 and not runtime_network_security.get("guard_active")
@@ -898,7 +2142,8 @@ def register(mcp) -> None:
             "mcp_auth_mode": desired["mcp_auth_mode"],
             "mcp_network_security": runtime_network_security,
             "warnings": (
-                (
+                warnings
+                + (
                     [runtime_network_security["reason"]]
                     if runtime_network_security.get("override_active") else []
                 )
@@ -928,6 +2173,12 @@ def register(mcp) -> None:
                 )
             ),
         })
+
+
+    @mcp.custom_route("/api/config", methods=["POST"])
+    async def api_config_update(request: Request) -> Response:
+        async with config_commit_lock:
+            return await _api_config_update_locked(request)
 
 
     # =============================================================

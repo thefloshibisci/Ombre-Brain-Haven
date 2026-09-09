@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import web.config_api as config_api
+from web import _shared as shared
 from utils import get_ai_name, load_config
 
 
@@ -27,6 +28,28 @@ class JsonRequest:
 
     async def json(self):
         return self._body
+
+
+def test_shared_dashboard_writer_uses_the_same_env_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(shared, "repo_root", str(tmp_path), raising=False)
+    explicit = str(tmp_path / "custom" / "dashboard.env")
+    monkeypatch.setenv("OMBRE_ENV_PATH", explicit)
+    monkeypatch.setenv("OMBRE_STATE_DIR", str(tmp_path / "state"))
+    assert shared._project_env_path() == explicit
+
+    monkeypatch.delenv("OMBRE_ENV_PATH")
+    assert shared._project_env_path() == os.path.join(str(tmp_path / "state"), ".env")
+
+    monkeypatch.delenv("OMBRE_STATE_DIR")
+    assert shared._project_env_path() == os.path.join(str(tmp_path), ".env")
+
+
+def test_shared_dashboard_writer_creates_parent_for_explicit_env_path(monkeypatch, tmp_path):
+    env_path = tmp_path / "nested" / "state" / ".env"
+    monkeypatch.setenv("OMBRE_ENV_PATH", str(env_path))
+    shared._write_env_var("OMBRE_TEST_SHARED_PATH", "value")
+
+    assert env_path.read_text(encoding="utf-8") == "OMBRE_TEST_SHARED_PATH=value\n"
 
 
 @pytest.mark.asyncio

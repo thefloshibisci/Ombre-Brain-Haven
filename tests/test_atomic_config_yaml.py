@@ -6,6 +6,31 @@ import yaml
 import utils
 
 
+@pytest.mark.parametrize("exists", [True, False])
+def test_normal_file_verification_failure_restores_previous_bytes(monkeypatch, tmp_path, exists):
+    config_path = tmp_path / "config.yaml"
+    original = b"# keep this comment\r\nexisting: keep\r\n"
+    if exists:
+        config_path.write_bytes(original)
+    monkeypatch.setenv("OMBRE_CONFIG_PATH", str(config_path))
+    real_load = utils.yaml.safe_load
+
+    def mismatch_after_write(source):
+        result = real_load(source)
+        if isinstance(result, dict) and result.get("new") == "value":
+            return {"unexpected": "value"}
+        return result
+
+    monkeypatch.setattr(utils.yaml, "safe_load", mismatch_after_write)
+    with pytest.raises(OSError, match="verification failed"):
+        utils.atomic_update_config_yaml(lambda config: config.update(new="value"))
+    if exists:
+        assert config_path.read_bytes() == original
+    else:
+        assert not config_path.exists()
+    assert list(tmp_path.glob(".*.tmp.*")) == []
+
+
 def test_read_config_yaml_uses_config_path_and_validates_mapping(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

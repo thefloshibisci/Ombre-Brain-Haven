@@ -1055,6 +1055,27 @@
   #settings-view[data-active-sgroup="basics"]   .config-section[data-sgroup]:not([data-sgroup="basics"])   { display: none !important; }
   #settings-view[data-active-sgroup="advanced"] .config-section[data-sgroup]:not([data-sgroup="advanced"]) { display: none !important; }
   #settings-view[data-active-sgroup="backup"]   .config-section[data-sgroup]:not([data-sgroup="backup"])   { display: none !important; }
+  #settings-view[data-active-sgroup="models"]   .config-section[data-sgroup]:not([data-sgroup="models"])   { display: none !important; }
+  #settings-view[data-active-sgroup="memory"]   .config-section[data-sgroup]:not([data-sgroup="memory"])   { display: none !important; }
+  .extended-config-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .extended-config-card { padding:14px; border-radius:14px; background:var(--surface-solid); box-shadow:4px 4px 10px var(--shadow-dark-subtle),-3px -3px 8px var(--shadow-light); }
+  .extended-config-card h4 { margin:0 0 10px; color:var(--accent); font-size:13px; }
+  .extended-config-card .config-row { margin:8px 0; }
+  .extended-config-card .config-row label { min-width:126px; }
+  .extended-config-card input, .extended-config-card select, .extended-config-card textarea { width:100%; min-width:0; }
+  .extended-config-card textarea { min-height:58px; resize:vertical; }
+  .upstream-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+  .upstream-card-title { color:var(--accent); font-size:12px; font-weight:600; }
+  .upstream-status { color:var(--text-light); font-size:10px; }
+  .upstream-models { margin:8px 0 2px; }
+  .upstream-note { margin:-3px 0 8px 118px; color:var(--text-light); font-size:10px; line-height:1.5; }
+  .extended-config-card .config-row { display:grid; grid-template-columns:126px minmax(0,1fr); align-items:center; gap:8px; }
+  .upstream-card { margin:10px 0; padding:12px; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,.18); }
+  .upstream-card .config-row { grid-template-columns:110px minmax(0,1fr); }
+  .upstream-model-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:6px; margin:6px 0; }
+  .upstream-model-row input { min-width:0; }
+  .extended-save-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:14px 0 4px; }
+  @media (max-width:680px) { .extended-config-grid { grid-template-columns:1fr; } .extended-config-card .config-row, .upstream-card .config-row, .upstream-model-row { grid-template-columns:1fr; gap:4px; } .upstream-note { margin-left:0; } }
 
   /* ============ 输入 / 下拉 / 文本域：统一内凹 LCD 输入槽 ============ */
   input[type=text], input[type=password], input[type=number], input[type=date],
@@ -2030,6 +2051,128 @@
     .tab-spacer { display: none; }
   }
 
+  /* ====== Care / 照顾：只读聚合面板，复用 3.6.3 掌机外壳 ====== */
+  .care-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+  .care-card { margin-bottom: 0; min-width: 0; }
+  .care-card-wide { grid-column: 1 / -1; }
+  .care-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .care-card-head h3 { margin-bottom: 0; }
+  .care-card-meta { color: var(--text-light); font-size: 11px; }
+  .care-list { display: flex; flex-direction: column; gap: 9px; }
+  .care-item {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: rgba(255,255,255,0.18);
+    min-width: 0;
+  }
+  .care-item-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .care-item-title button {
+    margin-left: auto;
+    padding: 2px 7px;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .care-item-title button:hover { border-color: var(--accent); }
+  .care-item-body, .care-pre {
+    margin-top: 5px;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .care-item-time { margin-left: auto; color: var(--text-light); font-size: 10px; }
+  .care-empty, .care-unavailable {
+    padding: 18px 8px;
+    color: var(--text-dim);
+    font-size: 12px;
+    text-align: center;
+  }
+  .care-unavailable { color: var(--warning); }
+  .care-kv {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px 14px;
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  .care-kv b { color: var(--text); font-weight: 500; }
+  .care-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .care-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    padding: 3px 8px;
+    border-radius: 10px;
+    background: rgba(194,152,47,0.10);
+    color: var(--text-dim);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+  .care-chip strong { color: var(--accent); font-weight: 500; }
+  .care-metric-group { margin-top: 10px; }
+  .care-metric-group:first-child { margin-top: 0; }
+  .care-metric-group-title { margin-bottom: 6px; color: var(--text-dim); font-size: 11px; }
+  .care-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; }
+  .care-metric { min-width: 0; }
+  .care-metric-line { display: flex; justify-content: space-between; gap: 8px; color: var(--text-dim); font-size: 11px; }
+  .care-metric-line strong { color: var(--text); font-weight: 500; white-space: nowrap; }
+  .care-meter { height: 4px; margin-top: 4px; overflow: hidden; border-radius: 4px; background: rgba(126, 101, 65, 0.12); }
+  .care-meter-fill { height: 100%; border-radius: inherit; background: var(--accent); opacity: 0.72; }
+  .care-note { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+  .care-refreshing { opacity: 0.72; }
+
+  .care-toolbar { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin:10px 0; }
+  .care-toolbar button, .care-toolbar select { padding:5px 8px; font-size:11px; }
+  .care-toolbar .active { border-color:var(--accent); color:var(--accent); }
+  .care-form { display:none; margin:10px 0 12px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-control); background:rgba(255,255,255,.16); }
+  .care-form.open { display:block; }
+  .care-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .care-form-grid .wide { grid-column:1/-1; }
+  .care-form label { display:block; margin-bottom:4px; color:var(--text-dim); font-size:11px; }
+  .care-form input, .care-form textarea, .care-form select { width:100%; box-sizing:border-box; padding:7px 8px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text); font:inherit; font-size:12px; }
+  .care-form textarea { min-height:70px; resize:vertical; }
+  .care-form-actions { display:flex; gap:7px; justify-content:flex-end; margin-top:10px; }
+  .care-item-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .care-item-actions button { padding:3px 7px; border:1px solid var(--border); border-radius:7px; background:transparent; color:var(--text-dim); font-size:11px; cursor:pointer; }
+  .care-item-actions button:hover { border-color:var(--accent); color:var(--accent); }
+  .care-calendar { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:4px; margin:10px 0; }
+  .care-calendar button { min-height:32px; padding:4px 2px; border:1px solid transparent; border-radius:7px; background:transparent; color:var(--text-dim); font-size:11px; cursor:pointer; }
+  .care-calendar button:hover, .care-calendar button.selected { border-color:var(--accent); color:var(--accent); }
+  .care-calendar button.has-items { background:rgba(194,152,47,.10); }
+  .care-calendar .weekday { color:var(--text-light); cursor:default; }
+  .care-calendar .empty { visibility:hidden; }
+  @media (max-width: 768px) {
+    .care-grid { grid-template-columns: 1fr; }
+    .care-card-wide { grid-column: auto; }
+    .care-card { padding: 18px; }
+    .care-form-grid, .care-metrics { grid-template-columns: 1fr; }
+  }
+
   /* 更窄的 PC 窗口将入口稳定排成 6 + 5，避免“关于”独占一行。 */
   @media (min-width: 769px) and (max-width: 1100px) {
     .tabs { grid-template-columns: repeat(6, minmax(0, 1fr)); }
@@ -2133,6 +2276,7 @@
   <div class="tab" data-tab="breath"><span>Breath 模拟</span><span class="tab-en">Breath Trace</span></div>
   <div class="tab" data-tab="network"><span>记忆网络</span><span class="tab-en">Network</span></div>
   <div class="tab" data-tab="plan"><span>计划</span><span class="tab-en">Plans</span></div>
+  <div class="tab" data-tab="care"><span>照顾</span><span class="tab-en">Care</span></div>
   <div class="tab" data-tab="letters"><span>信</span><span class="tab-en">Letters</span></div>
   <div class="tab" data-tab="anchors"><span>锚点</span><span class="tab-en">Anchors</span></div>
   <div class="tab" data-tab="import"><span>导入</span><span class="tab-en">Import</span></div>
@@ -2444,6 +2588,77 @@
   </div>
 </div>
 
+<!-- ====== Care tab：旧 Haven 能力的 3.6.3 只读聚合入口 ====== -->
+<div class="content" id="care-view" style="display:none">
+  <div style="max-width:1100px;margin:0 auto;">
+    <div class="config-section" style="margin-bottom:18px;">
+      <div class="care-card-head">
+        <h3>照顾 <span class="en">Care</span> <span style="font-size:11px;color:var(--text-light);font-style:italic;font-family:'Cormorant Garamond',serif;">— a quiet read-only room</span></h3>
+        <div style="display:flex;align-items:center;gap:9px;">
+          <span id="care-status" class="care-card-meta" aria-live="polite" aria-atomic="true">尚未加载 / Not loaded</span>
+          <button id="care-refresh-button" type="button" class="btn-secondary" aria-label="刷新照顾面板 / Refresh Care" title="刷新照顾面板 / Refresh Care" style="padding:6px 10px;font-size:12px;"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+        </div>
+      </div>
+      <div style="margin-top:8px;color:var(--text-dim);font-size:12px;line-height:1.65;">这里把旧 Haven 的照顾线索收拢成只读概览；每块单独读取，某个兼容 API 不可用时不会影响其他内容。</div>
+    </div>
+    <div class="care-grid">
+      <div class="config-section care-card" id="care-reminders-section">
+        <div class="care-card-head"><h3>照顾备忘 <span class="sec-en">Care memos</span></h3><div style="display:flex;align-items:center;gap:7px;"><span id="care-reminders-count" class="care-card-meta" aria-live="polite"></span><button id="care-reminder-add-button" type="button" class="btn-secondary" style="padding:4px 8px;font-size:11px;">新增</button></div></div>
+        <div class="care-toolbar" aria-label="Care memo filters">
+          <button type="button" class="filter-btn active" aria-pressed="true" data-care-reminder-status="active">进行中</button>
+          <button type="button" class="filter-btn" aria-pressed="false" data-care-reminder-status="done">已完成</button>
+          <button type="button" class="filter-btn" aria-pressed="false" data-care-reminder-status="archived">已归档</button>
+          <button type="button" class="filter-btn" aria-pressed="false" data-care-reminder-status="all">全部</button>
+        </div>
+        <form id="care-reminder-form" class="care-form">
+          <div class="care-form-grid">
+            <div><label for="care-reminder-title">标题</label><input id="care-reminder-title" name="title" type="text" autocomplete="off" required maxlength="200"></div>
+            <div><label for="care-reminder-repeat">重复</label><select id="care-reminder-repeat" name="repeat_rule" autocomplete="off"><option value="every_n_rounds">每隔几轮</option><option value="daily">每天</option><option value="morning_evening">早晚</option><option value="once">一次</option><option value="none">不重复</option></select></div>
+            <div class="wide"><label for="care-reminder-content">正文</label><textarea id="care-reminder-content" name="content" autocomplete="off" required></textarea></div>
+            <div><label for="care-reminder-start">开始</label><input id="care-reminder-start" name="start_at" type="text" autocomplete="off" placeholder="可留空…"></div>
+            <div><label for="care-reminder-end">结束</label><input id="care-reminder-end" name="end_at" type="text" autocomplete="off" placeholder="可留空…"></div>
+            <div><label for="care-reminder-next">下次出现</label><input id="care-reminder-next" name="next_due_at" type="text" autocomplete="off" placeholder="可留空…"></div>
+            <div><label for="care-reminder-rounds">轮次间隔</label><input id="care-reminder-rounds" name="interval_rounds" type="number" min="0" value="6" inputmode="numeric"></div>
+            <div><label for="care-reminder-daily">每日上限</label><input id="care-reminder-daily" name="daily_limit" type="number" min="0" value="1" inputmode="numeric"></div>
+            <div><label for="care-reminder-max">总上限</label><input id="care-reminder-max" name="max_injections" type="number" min="0" value="0" inputmode="numeric"></div>
+          </div>
+          <div id="care-reminder-form-message" class="care-card-meta" aria-live="polite" style="margin-top:8px;"></div>
+          <div class="care-form-actions"><button id="care-reminder-cancel-button" type="button" class="btn-secondary">取消</button><button type="submit">保存</button></div>
+        </form>
+        <div id="care-reminders-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
+      </div>
+      <div class="config-section care-card" id="care-moments-section">
+        <div class="care-card-head"><h3>日印象 <span class="sec-en">Daily impressions</span></h3><div style="display:flex;align-items:center;gap:7px;"><span id="care-moments-count" class="care-card-meta" aria-live="polite"></span><button id="care-moments-prev-button" type="button" class="btn-secondary" aria-label="上一个月 / Previous month" title="上一个月 / Previous month" style="padding:4px 7px;font-size:11px;">‹</button><span id="care-moments-month" class="care-card-meta" aria-live="polite"></span><button id="care-moments-next-button" type="button" class="btn-secondary" aria-label="下一个月 / Next month" title="下一个月 / Next month" style="padding:4px 7px;font-size:11px;">›</button></div></div>
+        <div id="care-moments-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
+      </div>
+      <div class="config-section care-card" id="care-pending-section">
+        <div class="care-card-head"><h3>自动记忆待审 <span class="sec-en">Pending memory</span></h3><span id="care-pending-count" class="care-card-meta" aria-live="polite"></span></div>
+        <div id="care-pending-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
+      </div>
+      <div class="config-section care-card" id="care-dreams-section">
+        <div class="care-card-head"><h3>梦境 <span class="sec-en">Dreams</span></h3><span id="care-dreams-count" class="care-card-meta"></span></div>
+        <div id="care-dreams-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
+      </div>
+      <div class="config-section care-card" id="care-persona-section">
+        <div class="care-card-head"><h3>Persona <span class="sec-en">State</span></h3><div style="display:flex;align-items:center;gap:7px;"><select id="care-persona-session" name="persona_session" aria-label="Persona session" autocomplete="off" style="max-width:150px;padding:4px 6px;font-size:11px;"><option value="">当前 session</option></select><span id="care-persona-count" class="care-card-meta" aria-live="polite"></span></div></div>
+        <div id="care-persona-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
+      </div>
+      <div class="config-section care-card" id="care-portrait-section">
+        <div class="care-card-head"><h3>画像 <span class="sec-en">Portrait</span></h3><span id="care-portrait-count" class="care-card-meta"></span></div>
+        <div id="care-portrait-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
+      </div>
+      <div class="config-section care-card" id="care-facts-section">
+        <div class="care-card-head"><h3>画像事实 <span class="sec-en">Profile facts</span></h3><span id="care-facts-count" class="care-card-meta"></span></div>
+        <div id="care-facts-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
+      </div>
+      <div class="config-section care-card care-card-wide" id="care-wordmap-section">
+        <div class="care-card-head"><h3>词图概览 <span class="sec-en">Word Map</span></h3><span id="care-wordmap-count" class="care-card-meta"></span></div>
+        <div id="care-wordmap-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ====== iter 1.7 §H: About / Author note ====== -->
 <div class="content" id="about-view" style="display:none">
   <div style="max-width:680px;margin:0 auto;padding:20px 0;">
@@ -2533,6 +2748,8 @@
     <!-- 设置分组子 tab：常规 / 高级 / 备份与迁移 -->
     <div class="settings-subtabs">
       <div class="settings-subtab active" data-sgroup="basics"  onclick="showSettingsGroup('basics')">常规<span class="en">Basics</span></div>
+      <div class="settings-subtab"        data-sgroup="models"  onclick="showSettingsGroup('models')">模型<span class="en">Models</span></div>
+      <div class="settings-subtab"        data-sgroup="memory"  onclick="showSettingsGroup('memory')">记忆浮现<span class="en">Surfacing</span></div>
       <div class="settings-subtab"        data-sgroup="advanced" onclick="showSettingsGroup('advanced')">高级<span class="en">Advanced</span></div>
       <div class="settings-subtab"        data-sgroup="backup"   onclick="showSettingsGroup('backup')">备份与迁移<span class="en">Backup</span></div>
     </div>
@@ -3021,13 +3238,158 @@
       </div>
 
       <div style="display:flex;gap:12px;margin-top:14px;align-items:center;">
-        <button class="btn-primary" onclick="saveConfig(true)" title="保存配置 / Save config" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存配置</button>
+        <button type="button" class="btn-primary" data-config-save="true" onclick="saveConfig(true)" title="保存配置 / Save config" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存配置</button>
         <span id="config-status" style="font-size:13px;"></span>
       </div>
       <div style="margin-top:6px;font-size:11px;color:var(--text-light);">注：本「保存」按钮同时提交「引擎」与「桶行为」中除采样外的所有字段（同一个 /api/config 接口），并立即写入 config.yaml。</div>
     </div>
 
     <!-- ④ 桶行为 -->
+    <!-- ③ 模型与上游：保持 3.6.3 紧凑卡片，不把旧 Haven 长导航搬回来 -->
+    <div class="config-section" id="sec-models" data-sgroup="models">
+      <h3>模型配置 <span class="sec-en">Models</span></h3>
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.7;margin:4px 0 12px;">这里管理记忆路由、重排、Persona、夜梦、反思与画像使用的模型。API Key 只会在勾选“同时保存到 .env”后写入本机环境文件，页面不会回显明文。</p>
+      <div class="extended-config-grid">
+        <div class="extended-config-card">
+          <h4>Domain Sentinel · 领域哨兵</h4>
+          <div class="config-row"><label for="cfg-domain-sentinel-enabled">启用</label><select id="cfg-domain-sentinel-enabled" name="domain_sentinel_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-domain-sentinel-model">模型</label><input id="cfg-domain-sentinel-model" name="domain_sentinel_model" type="text" autocomplete="off" placeholder="留空沿用脱水模型"></div>
+          <div class="config-row"><label for="cfg-domain-sentinel-base-url">Base URL</label><input id="cfg-domain-sentinel-base-url" name="domain_sentinel_base_url" type="text" autocomplete="off" placeholder="留空沿用脱水地址"></div>
+          <div class="config-row"><label for="cfg-domain-sentinel-api-key">API Key</label><input id="cfg-domain-sentinel-api-key" name="domain_sentinel_api_key" type="password" autocomplete="new-password" placeholder="留空 = 不修改"></div>
+          <div class="config-row"><label for="cfg-domain-sentinel-thinking">思考模式</label><select id="cfg-domain-sentinel-thinking" name="domain_sentinel_enable_thinking"><option value="false">关闭</option><option value="true">开启</option></select></div>
+          <div class="config-row"><label for="cfg-domain-sentinel-max-tokens">最大 tokens</label><input id="cfg-domain-sentinel-max-tokens" name="domain_sentinel_max_tokens" type="number" min="1" max="100000" inputmode="numeric"></div>
+        </div>
+        <div class="extended-config-card">
+          <h4>Reranker · 重排</h4>
+          <div class="config-row"><label for="cfg-reranker-enabled">启用</label><select id="cfg-reranker-enabled" name="reranker_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-reranker-model">模型</label><input id="cfg-reranker-model" name="reranker_model" type="text" autocomplete="off" placeholder="Qwen/Qwen3-Reranker-4B"></div>
+          <div class="config-row"><label for="cfg-reranker-base-url">Base URL</label><input id="cfg-reranker-base-url" name="reranker_base_url" type="text" autocomplete="off"></div>
+          <div class="config-row"><label for="cfg-reranker-api-key">API Key</label><input id="cfg-reranker-api-key" name="reranker_api_key" type="password" autocomplete="new-password" placeholder="留空 = 不修改"></div>
+          <div class="config-row"><label for="cfg-reranker-candidate-limit">候选数</label><input id="cfg-reranker-candidate-limit" name="reranker_candidate_limit" type="number" min="1" max="100" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-reranker-score-weight">分数权重</label><input id="cfg-reranker-score-weight" name="reranker_score_weight" type="number" min="0" max="1" step="0.01" inputmode="decimal"></div>
+        </div>
+        <div class="extended-config-card">
+          <h4>Persona · 人格状态</h4>
+          <div class="config-row"><label for="cfg-persona-enabled">启用</label><select id="cfg-persona-enabled" name="persona_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-persona-event-recording">记录事件</label><select id="cfg-persona-event-recording" name="persona_event_recording_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-persona-conflict-nudge">冲突提醒</label><select id="cfg-persona-conflict-nudge" name="persona_conflict_nudge_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-persona-model">模型</label><input id="cfg-persona-model" name="persona_model" type="text" autocomplete="off"></div>
+          <div class="config-row"><label for="cfg-persona-base-url">Base URL</label><input id="cfg-persona-base-url" name="persona_base_url" type="text" autocomplete="off"></div>
+          <div class="config-row"><label for="cfg-persona-api-key">API Key</label><input id="cfg-persona-api-key" name="persona_api_key" type="password" autocomplete="new-password" placeholder="留空 = 不修改"></div>
+        </div>
+        <div class="extended-config-card">
+          <h4>Reflection · 反思 / 日印象</h4>
+          <div class="config-row"><label for="cfg-reflection-enabled">启用</label><select id="cfg-reflection-enabled" name="reflection_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-reflection-auto">自动运行</label><select id="cfg-reflection-auto" name="reflection_auto_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-reflection-daily">每日印象</label><select id="cfg-reflection-daily" name="reflection_daily_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-reflection-model">模型</label><input id="cfg-reflection-model" name="reflection_model" type="text" autocomplete="off"></div>
+          <div class="config-row"><label for="cfg-reflection-base-url">Base URL</label><input id="cfg-reflection-base-url" name="reflection_base_url" type="text" autocomplete="off"></div>
+          <div class="config-row"><label for="cfg-reflection-thinking">思考模式</label><select id="cfg-reflection-thinking" name="reflection_thinking_mode"><option value="">默认</option><option value="enabled">开启</option><option value="disabled">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-reflection-api-key">API Key</label><input id="cfg-reflection-api-key" name="reflection_api_key" type="password" autocomplete="new-password" placeholder="留空 = 不修改"></div>
+          <div class="config-row"><label for="cfg-daily-memory-summary-enabled">启用摘要压缩</label><select id="cfg-daily-memory-summary-enabled" name="daily_chat_memory_summary_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-daily-memory-mode">运行模式</label><select id="cfg-daily-memory-mode" name="daily_chat_memory_mode"><option value="review">审核候选</option><option value="auto">自动写入</option><option value="off">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-daily-memory-hour">每日运行小时</label><input id="cfg-daily-memory-hour" name="daily_chat_memory_hour" type="number" min="0" max="23" step="1" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-daily-memory-turn-limit">原始对话上限</label><input id="cfg-daily-memory-turn-limit" name="daily_chat_memory_turn_limit" type="number" min="0" max="100000" step="1" inputmode="numeric" placeholder="0 = 不限"></div>
+          <div class="config-row"><label for="cfg-daily-memory-max-per-day">每日最多写入</label><input id="cfg-daily-memory-max-per-day" name="daily_chat_memory_max_per_day" type="number" min="0" max="100000" step="1" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-daily-memory-min-confidence">自动写入置信度</label><input id="cfg-daily-memory-min-confidence" name="daily_chat_memory_min_confidence" type="number" min="0" max="1" step="0.01" inputmode="decimal"></div>
+          <div class="config-row"><label for="cfg-daily-memory-review-max-per-day">审核候选上限</label><input id="cfg-daily-memory-review-max-per-day" name="daily_chat_memory_review_max_per_day" type="number" min="0" max="100000" step="1" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-daily-memory-review-min-confidence">审核最低置信度</label><input id="cfg-daily-memory-review-min-confidence" name="daily_chat_memory_review_min_confidence" type="number" min="0" max="1" step="0.01" inputmode="decimal"></div>
+        </div>
+        <div class="extended-config-card">
+          <h4>Automatic Memory · 自动记忆模型</h4>
+          <p style="font-size:11px;color:var(--text-dim);line-height:1.6;margin:0 0 8px;">这是从 Gateway 聊天中提炼长期记忆的独立模型链路，不等同于召回/Embedding 模型。留空模型或地址时会按后端规则回退。</p>
+          <div class="config-row"><label for="cfg-daily-memory-summary-model">摘要模型</label><input id="cfg-daily-memory-summary-model" name="daily_chat_memory_summary_model" type="text" autocomplete="off" placeholder="留空 = 回退到反思/脱水模型"></div>
+          <div class="config-row"><label for="cfg-daily-memory-candidate-model">候选模型</label><input id="cfg-daily-memory-candidate-model" name="daily_chat_memory_candidate_model" type="text" autocomplete="off" placeholder="留空 = 使用摘要模型"></div>
+          <div class="config-row"><label for="cfg-daily-memory-base-url">Base URL</label><input id="cfg-daily-memory-base-url" name="daily_chat_memory_base_url" type="text" autocomplete="off" placeholder="留空 = 使用默认地址"></div>
+          <div class="config-row"><label for="cfg-daily-memory-api-key-env">API Key 环境变量</label><input id="cfg-daily-memory-api-key-env" name="daily_chat_memory_api_key_env" type="text" autocomplete="off" spellcheck="false" placeholder="例如 DAILY_MEMORY_API_KEY"></div>
+          <div class="config-row"><label for="cfg-daily-memory-timeout">请求超时（秒）</label><input id="cfg-daily-memory-timeout" name="daily_chat_memory_timeout_seconds" type="number" min="30" max="300" step="1" inputmode="decimal"></div>
+          <div class="config-row"><label for="cfg-daily-memory-summary-max-tokens">摘要最大 tokens</label><input id="cfg-daily-memory-summary-max-tokens" name="daily_chat_memory_summary_max_tokens" type="number" min="300" max="4000" step="1" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-daily-memory-candidate-max-tokens">候选最大 tokens</label><input id="cfg-daily-memory-candidate-max-tokens" name="daily_chat_memory_candidate_max_tokens" type="number" min="300" max="4000" step="1" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-daily-memory-summary-window">摘要窗口 turns</label><input id="cfg-daily-memory-summary-window" name="daily_chat_memory_summary_window_turns" type="number" min="1" max="200" step="1" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-daily-memory-summary-stride">摘要步长 turns</label><input id="cfg-daily-memory-summary-stride" name="daily_chat_memory_summary_stride_turns" type="number" min="1" max="200" step="1" inputmode="numeric"></div>
+
+        </div>
+        <div class="extended-config-card">
+          <h4>Dream · 夜梦</h4>
+          <div class="config-row"><label for="cfg-dream-enabled">启用</label><select id="cfg-dream-enabled" name="dream_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-dream-auto">自动运行</label><select id="cfg-dream-auto" name="dream_auto_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-dream-surface">允许浮现</label><select id="cfg-dream-surface" name="dream_surface_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-dream-inject">注入 Gateway</label><select id="cfg-dream-inject" name="dream_inject_enabled"><option value="false">关闭</option><option value="true">开启</option></select></div>
+          <div class="config-row"><label for="cfg-dream-model">模型</label><input id="cfg-dream-model" name="dream_model" type="text" autocomplete="off"></div>
+          <div class="config-row"><label for="cfg-dream-base-url">Base URL</label><input id="cfg-dream-base-url" name="dream_base_url" type="text" autocomplete="off"></div>
+          <div class="config-row"><label for="cfg-dream-api-key">API Key</label><input id="cfg-dream-api-key" name="dream_api_key" type="password" autocomplete="new-password" placeholder="留空 = 不修改"></div>
+          <div class="config-row"><label for="cfg-dream-thinking">思考模式</label><input id="cfg-dream-thinking" name="dream_thinking_mode" type="text" autocomplete="off" placeholder="disabled / enabled"></div>
+        </div>
+        <div class="extended-config-card">
+          <h4>Portrait · 画像</h4>
+          <div class="config-row"><label for="cfg-portrait-enabled">启用</label><select id="cfg-portrait-enabled" name="portrait_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-portrait-auto">自动维护</label><select id="cfg-portrait-auto" name="portrait_auto_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-portrait-initial">首次自动</label><select id="cfg-portrait-initial" name="portrait_auto_initial_enabled"><option value="false">关闭</option><option value="true">开启</option></select></div>
+          <div class="config-row"><label for="cfg-portrait-daily">每日维护</label><select id="cfg-portrait-daily" name="portrait_daily_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-portrait-model">模型</label><input id="cfg-portrait-model" name="portrait_model" type="text" autocomplete="off"></div>
+          <div class="config-row"><label for="cfg-portrait-base-url">Base URL</label><input id="cfg-portrait-base-url" name="portrait_base_url" type="text" autocomplete="off"></div>
+          <div class="config-row"><label for="cfg-portrait-api-key">API Key</label><input id="cfg-portrait-api-key" name="portrait_api_key" type="password" autocomplete="new-password" placeholder="留空 = 不修改"></div>
+        </div>
+      </div>
+      <div class="extended-config-card" style="margin-top:12px;">
+        <h4>上游模型 / Upstreams</h4>
+        <p style="font-size:11px;color:var(--text-dim);line-height:1.6;margin:0 0 8px;">可配置多个 OpenAI / Anthropic 上游。每个模型可设置对外 alias 与上游真实模型名；环境变量名只保存名称，显式 Key 需要勾选下方 .env 选项。</p>
+        <div id="cfg-upstreams-list"></div>
+        <button type="button" class="btn-secondary" onclick="addExtendedUpstream()" style="font-size:12px;padding:5px 12px;">＋ 添加上游</button>
+      </div>
+      <div class="extended-save-row">
+        <label style="font-size:12px;color:var(--text-dim);"><input type="checkbox" id="cfg-extended-persist-env" name="persist_env"> 同时保存新 API Key 到 .env</label>
+        <button type="button" class="btn-primary" data-config-save="true" onclick="saveConfig(true)" style="padding:0 14px;height:34px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="save"></i> 保存模型配置</button>
+      </div>
+      <div id="extended-config-status" style="font-size:12px;min-height:18px;"></div>
+    </div>
+
+    <!-- ④ 记忆浮现：只迁移配置能力，不恢复旧版横向导航 -->
+    <div class="config-section" id="sec-memory-surfacing" data-sgroup="memory">
+      <h3>记忆浮现 <span class="sec-en">Memory Surfacing</span></h3>
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.7;margin:4px 0 12px;">控制 Recent Context、直命中、扩散、细节二次取回和查询再浮现。这里是运行策略，不会触发 Breath。</p>
+      <div class="extended-config-card">
+        <h4>Gateway 浮现策略</h4>
+        <div class="extended-config-grid">
+          <div class="config-row"><label for="cfg-ext-recent-enabled">最近记忆</label><select id="cfg-ext-recent-enabled" name="recent_context_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-ext-persona-context-enabled">Persona 轻提醒</label><select id="cfg-ext-persona-context-enabled" name="persona_context_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-ext-persona-context-rounds">提醒轮数</label><input id="cfg-ext-persona-context-rounds" name="current_inner_state_interval_rounds" type="number" min="0" max="10000" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-ext-cooldown">冷却小时</label><input id="cfg-ext-cooldown" name="cooldown_hours" type="number" min="0" max="87600" step="0.5" inputmode="decimal"></div>
+          <div class="config-row"><label for="cfg-ext-skip-rounds">跳过轮数</label><input id="cfg-ext-skip-rounds" name="skip_recent_rounds" type="number" min="0" max="10000" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-ext-recent-cooldown">最近冷却</label><input id="cfg-ext-recent-cooldown" name="recent_context_cooldown_hours" type="number" min="0" max="87600" step="0.5" inputmode="decimal"></div>
+          <div class="config-row"><label for="cfg-ext-reentry">再进入闲置</label><input id="cfg-ext-reentry" name="recent_context_reentry_idle_hours" type="number" min="0" max="87600" step="0.5" inputmode="decimal"></div>
+          <div class="config-row"><label for="cfg-ext-recent-budget">最近预算</label><input id="cfg-ext-recent-budget" name="recent_context_budget" type="number" min="0" max="200000" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-ext-recalled-budget">直命中预算</label><input id="cfg-ext-recalled-budget" name="recalled_memory_budget" type="number" min="0" max="200000" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-ext-related-budget">扩散预算</label><input id="cfg-ext-related-budget" name="related_memory_budget" type="number" min="0" max="200000" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-ext-detail-enabled">细节二次取回</label><select id="cfg-ext-detail-enabled" name="memory_detail_recall_enabled"><option value="false">关闭</option><option value="true">开启</option></select></div>
+          <div class="config-row"><label for="cfg-ext-detail-max-ids">细节条数</label><input id="cfg-ext-detail-max-ids" name="memory_detail_recall_max_ids" type="number" min="1" max="100" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-ext-detail-budget">细节预算</label><input id="cfg-ext-detail-budget" name="memory_detail_recall_budget" type="number" min="0" max="200000" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-ext-render-mode">渲染模式</label><select id="cfg-ext-render-mode" name="direct_render_mode"><option value="auto">自动</option><option value="compact">紧凑</option><option value="full">完整</option></select></div>
+          <div class="config-row"><label for="cfg-ext-retrieval-mode">检索方式</label><select id="cfg-ext-retrieval-mode" name="retrieval_mode"><option value="graph">图</option><option value="bucket">Bucket</option></select></div>
+          <div class="config-row"><label for="cfg-ext-rewrite">上下文改写</label><select id="cfg-ext-rewrite" name="operit_context_rewrite_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-ext-word-map-hint">词图提示</label><select id="cfg-ext-word-map-hint" name="word_map_hint_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-ext-query-planner">查询规划</label><select id="cfg-ext-query-planner" name="query_planner_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+        </div>
+      </div>
+      <div class="extended-config-grid" style="margin-top:12px;">
+        <div class="extended-config-card">
+          <h4>查询再浮现 / Recall</h4>
+          <div class="config-row"><label for="cfg-recall-resurface">允许再浮现</label><select id="cfg-recall-resurface" name="query_resurface_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+        </div>
+        <div class="extended-config-card">
+          <h4>记忆扩散 / Diffusion</h4>
+          <div class="config-row"><label for="cfg-diffusion-enabled">启用</label><select id="cfg-diffusion-enabled" name="diffusion_enabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+          <div class="config-row"><label for="cfg-diffusion-top-k">Top K</label><input id="cfg-diffusion-top-k" name="top_k" type="number" min="0" max="20" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-diffusion-min-activation">最低激活</label><input id="cfg-diffusion-min-activation" name="min_activation" type="number" min="0" max="10" step="0.01" inputmode="decimal"></div>
+          <div class="config-row"><label for="cfg-diffusion-chain-enabled">链式游走</label><select id="cfg-diffusion-chain-enabled" name="chain_walk_enabled"><option value="false">关闭</option><option value="true">开启</option></select></div>
+          <div class="config-row"><label for="cfg-diffusion-chain-hops">最大跳数</label><input id="cfg-diffusion-chain-hops" name="chain_max_hops" type="number" min="1" max="12" inputmode="numeric"></div>
+          <div class="config-row"><label for="cfg-diffusion-chain-confidence">最低置信度</label><input id="cfg-diffusion-chain-confidence" name="chain_min_confidence" type="number" min="0" max="1" step="0.01" inputmode="decimal"></div>
+          <div class="config-row"><label for="cfg-diffusion-chain-frontier">最大前沿</label><input id="cfg-diffusion-chain-frontier" name="chain_max_frontier" type="number" min="1" max="200" inputmode="numeric"></div>
+        </div>
+      </div>
+      <div class="extended-save-row"><button type="button" class="btn-primary" data-config-save="true" onclick="saveConfig(true)" style="padding:0 14px;height:34px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="save"></i> 保存记忆浮现</button></div>
+    </div>
+
     <div class="config-section" id="sec-bucket" data-sgroup="basics">
       <h3>桶行为 <span class="sec-en">Bucket Behavior</span></h3>
 
@@ -3324,6 +3686,12 @@
     </div>
 
     <!-- ⑦ GitHub 同步 -->
+    <div class="config-section" id="sec-self-anchor" data-sgroup="advanced">
+      <h3>Self Anchor <span class="sec-en">Identity Anchor</span></h3>
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.7;margin:4px 0 10px;">指定夜梦/画像使用的身份坐标桶。这里只保存入口 ID，不会自动创建或修改 anchor。</p>
+      <div class="config-row"><label>入口 bucket ID</label><input id="cfg-self-anchor-entry" type="text" placeholder="可留空"></div>
+    </div>
+
     <div class="config-section" id="sec-github" data-sgroup="backup">
       <h3>GitHub 同步 <span class="sec-en">GitHub Sync</span></h3>
       <p style="font-size:12px;color:var(--text-light);margin:0 0 16px;line-height:1.7;">
@@ -4306,7 +4674,7 @@ const SB_ACTION_TARGETS = {
   github:    { field: 'sec-github' },          // GitHub 备份区
 };
 
-// P3 设置分组子 tab：切换「常规 / 高级 / 备份与迁移」。
+// P3 设置分组子 tab：切换「常规 / 模型 / 记忆浮现 / 高级 / 备份与迁移」。
 function showSettingsGroup(name) {
   const view = document.getElementById('settings-view');
   if (!view) return;
@@ -5138,11 +5506,12 @@ async function restartService() {
 }
 
 // authFetch: wraps fetch, shows auth overlay on 401
-async function authFetch(url, options) {
+async function authFetch(url, options, retryTransient) {
   let resp = await fetch(url, options);
   // 瞬时网关错误（多见于 Cloudflare 隧道刚重连的几秒窗口）：自动重试一次。
-  // 这些后端接口都是幂等的（读取 / upsert），重试安全，能让隧道抖动对用户隐形。
-  if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
+  // 默认只给历史上的幂等请求重试；创建/修改类请求可显式关闭，避免
+  // 首次请求已经落盘但响应丢失时被重复提交。
+  if (retryTransient !== false && (resp.status === 502 || resp.status === 503 || resp.status === 504)) {
     await new Promise(function (r) { setTimeout(r, 1200); });
     try { resp = await fetch(url, options); } catch (e) { /* 保留首个响应 */ }
   }
@@ -5183,7 +5552,10 @@ try {
 } catch (_) { /* localStorage unavailable: keep the compatible score default */ }
 var bucketLoadGeneration = 0;
 var selectedBucketIds = new Set();
-var developerMode = localStorage.getItem('ombreDeveloperMode') === 'true';
+var developerMode = false;
+try {
+  developerMode = localStorage.getItem('ombreDeveloperMode') === 'true';
+} catch (_) { /* localStorage unavailable: keep developer mode off */ }
 
 function syncBucketSortControl() {
   var control = document.getElementById('bucket-sort');
@@ -5312,11 +5684,18 @@ function activateDashboardTab(tab) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     const target = tab.dataset.tab;
+    // The expanded diagnostics panel is sticky and can cover Care/settings controls.
+    // Keep the compact status summary, but collapse its detail body on entry.
+    if (target === 'care' || target === 'settings') {
+      const statusBanner = document.getElementById('status-banner');
+      if (statusBanner) statusBanner.classList.remove('open');
+    }
     const pending = [];
     document.getElementById('list-view').style.display = target === 'list' ? '' : 'none';
     document.getElementById('breath-view').style.display = target === 'breath' ? '' : 'none';
     document.getElementById('network-view').style.display = target === 'network' ? '' : 'none';
     document.getElementById('plan-view').style.display = target === 'plan' ? '' : 'none';
+    document.getElementById('care-view').style.display = target === 'care' ? '' : 'none';
     document.getElementById('import-view').style.display = target === 'import' ? '' : 'none';
     document.getElementById('faq-view').style.display = target === 'faq' ? '' : 'none';
     document.getElementById('logs-view').style.display = target === 'logs' ? '' : 'none';
@@ -5328,6 +5707,7 @@ function activateDashboardTab(tab) {
     if (target !== 'network' && _netRAF) { cancelAnimationFrame(_netRAF); _netRAF = null; }
     if (target === 'network') pending.push(loadNetwork());
     if (target === 'plan') pending.push(loadPlans());
+    if (target === 'care') pending.push(loadCareDashboard());
     if (target === 'list') pending.push(loadBuckets());
     if (target === 'import') pending.push(pollImportStatus(), loadImportResults());
     if (target === 'logs') pending.push(loadLogs(), loadOBErrors());
@@ -5338,7 +5718,7 @@ function activateDashboardTab(tab) {
         loadSettingsStatus(),
         loadSystemDiagnostics(),
         loadHumanName(),
-        loadConfig(),
+        loadConfig({refreshEnv:false}),
         refreshEnvConfig(),
         loadGithubStatus(),
         loadSamplingSettings(),
@@ -7900,11 +8280,229 @@ async function loadOwnerBadge(cfg) {
   } catch (e) { /* ignore：徽标是锦上添花，失败不影响主流程 */ }
 }
 
+var extendedUpstreams = [];
+var configLoadGeneration = 0;
+var configStateReady = false;
+var configSaveInFlight = false;
+
+function cfgSet(id, value, fallback) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var resolved = (value === null || value === undefined || value === '') ? fallback : value;
+  el.value = resolved === null || resolved === undefined ? '' : String(resolved);
+}
+
+function cfgBool(id, value, fallback) {
+  var parsed = value === null || value === undefined
+    ? !!fallback
+    : (value === true || value === 1 || (typeof value === 'string' && ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase())));
+  cfgSet(id, parsed, false);
+}
+
+function cfgNum(id, fallback) {
+  var el = document.getElementById(id);
+  if (!el) return fallback;
+  var raw = String(el.value || '').trim();
+  if (raw === '') return fallback;
+  var parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function cfgText(id) {
+  var el = document.getElementById(id);
+  return el ? String(el.value || '').trim() : '';
+}
+
+function cfgSecret(id, section) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var masked = String((section || {}).api_key_masked || '');
+  el.value = '';
+  el.placeholder = masked ? ('当前：' + masked + '（留空 = 不修改）') : '未设置（留空 = 不修改）';
+}
+
+function normalizeExtendedModel(model) {
+  if (typeof model === 'string') return {id:model, upstream_model:model};
+  model = model || {};
+  var id = String(model.id || model.alias || model.name || model.model || '').trim();
+  var target = String(model.upstream_model || model.provider_model || model.target_model || model.model || id).trim();
+  return {id:id, upstream_model:target};
+}
+
+function normalizeExtendedUpstream(upstream, index) {
+  upstream = upstream || {};
+  var models = Array.isArray(upstream.models) ? upstream.models.map(normalizeExtendedModel) : [];
+  return {
+    name: String(upstream.name || ('upstream-' + (index + 1))).trim(),
+    protocol: String(upstream.protocol || 'openai').toLowerCase() === 'anthropic' ? 'anthropic' : 'openai',
+    base_url: String(upstream.base_url || '').trim(),
+    api_key_envs: Array.isArray(upstream.api_key_envs) ? upstream.api_key_envs.slice() : splitExtendedLines(upstream.api_key_env || ''),
+    api_key_values: Array.isArray(upstream.api_key_values) ? upstream.api_key_values.slice() : [],
+    key_count: Number(upstream.key_count || 0),
+    ready: !!upstream.ready,
+    default_model: String(upstream.default_model || '').trim(),
+    prompt_cache: String(upstream.prompt_cache || '').trim(),
+    prompt_cache_retention: String(upstream.prompt_cache_retention || '').trim(),
+    anthropic_version: String(upstream.anthropic_version || '').trim(),
+    anthropic_beta: String(upstream.anthropic_beta || '').trim(),
+    models: models,
+  };
+}
+
+function splitExtendedLines(value) {
+  return String(value || '').split(/[\n,]+/).map(function(v) { return v.trim(); }).filter(Boolean);
+}
+
+function splitExtendedSecretLines(value) {
+  var values = String(value || '').replace(/\r/g, '').split('\n').map(function(v) { return v.trim(); });
+  while (values.length && !values[values.length - 1]) values.pop();
+  return values;
+}
+
+function collectExtendedUpstreams(preserveEmptyModels) {
+  var cards = Array.from(document.querySelectorAll('#cfg-upstreams-list .upstream-card'));
+  return cards.map(function(card, index) {
+    var models = Array.from(card.querySelectorAll('.upstream-model-row')).map(function(row) {
+      var idEl = row.querySelector('[data-model-field="id"]');
+      var targetEl = row.querySelector('[data-model-field="target"]');
+      var id = idEl ? idEl.value.trim() : '';
+      var target = targetEl ? targetEl.value.trim() : '';
+      return (id || preserveEmptyModels) ? {id:id, upstream_model:target || id} : null;
+    }).filter(Boolean);
+    return {
+      name: cfgText('cfg-upstream-name-' + index) || ('upstream-' + (index + 1)),
+      protocol: cfgText('cfg-upstream-protocol-' + index) || 'openai',
+      base_url: cfgText('cfg-upstream-url-' + index),
+      api_key_envs: splitExtendedLines((document.getElementById('cfg-upstream-envs-' + index) || {}).value),
+      api_key_values: splitExtendedSecretLines((document.getElementById('cfg-upstream-key-values-' + index) || {}).value),
+      default_model: cfgText('cfg-upstream-default-' + index),
+      prompt_cache: cfgText('cfg-upstream-cache-' + index),
+      prompt_cache_retention: cfgText('cfg-upstream-cache-retention-' + index),
+      anthropic_version: cfgText('cfg-upstream-anthropic-version-' + index),
+      anthropic_beta: cfgText('cfg-upstream-anthropic-beta-' + index),
+      models: models,
+      key_count: Number(card.getAttribute('data-key-count') || 0),
+      ready: card.getAttribute('data-ready') === 'true',
+    };
+  });
+}
+
+function renderExtendedUpstreams() {
+  var list = document.getElementById('cfg-upstreams-list');
+  if (!list) return;
+  if (!extendedUpstreams.length) {
+    list.innerHTML = '<div style="font-size:11px;color:var(--text-light);line-height:1.7;margin:4px 0 10px;">还没有独立上游；可继续使用既有默认模型，或点击“添加上游”。</div>';
+    return;
+  }
+  list.innerHTML = extendedUpstreams.map(function(raw, index) {
+    var upstream = normalizeExtendedUpstream(raw, index);
+    var models = upstream.models.length ? upstream.models : [{id:'', upstream_model:''}];
+    var modelRows = models.map(function(model, modelIndex) {
+      return '<div class="upstream-model-row">'
+        + '<input data-model-field="id" name="upstreams[' + escAttr(index) + '].models[' + escAttr(modelIndex) + '].id" aria-label="客户端 alias" type="text" placeholder="客户端 alias" value="' + escAttr(model.id) + '">'
+        + '<input data-model-field="target" name="upstreams[' + escAttr(index) + '].models[' + escAttr(modelIndex) + '].upstream_model" aria-label="上游真实模型" type="text" placeholder="上游真实模型（留空同 alias）" value="' + escAttr(model.upstream_model) + '">'
+        + '<button type="button" class="btn-secondary" aria-label="删除模型映射" title="删除模型映射" onclick="removeExtendedUpstreamModel(' + index + ',' + modelIndex + ')">删除</button>'
+        + '</div>';
+    }).join('');
+    return '<div class="upstream-card" data-index="' + escAttr(index) + '" data-key-count="' + escAttr(upstream.key_count) + '" data-ready="' + escAttr(upstream.ready) + '">'
+      + '<div class="upstream-card-head"><div class="upstream-card-title">Provider ' + (index + 1) + '</div>'
+      + '<div class="upstream-status">' + (upstream.ready ? '已就绪' : '未就绪') + ' · ' + upstream.key_count + ' key</div></div>'
+      + '<div class="config-row"><label for="cfg-upstream-name-' + index + '">名称</label><input id="cfg-upstream-name-' + index + '" name="upstreams[' + escAttr(index) + '].name" type="text" value="' + escAttr(upstream.name) + '"></div>'
+      + '<div class="config-row"><label for="cfg-upstream-protocol-' + index + '">协议</label><select id="cfg-upstream-protocol-' + index + '" name="upstreams[' + escAttr(index) + '].protocol"><option value="openai"' + (upstream.protocol === 'openai' ? ' selected' : '') + '>OpenAI compatible</option><option value="anthropic"' + (upstream.protocol === 'anthropic' ? ' selected' : '') + '>Anthropic</option></select></div>'
+      + '<div class="config-row"><label for="cfg-upstream-url-' + index + '">Base URL</label><input id="cfg-upstream-url-' + index + '" name="upstreams[' + escAttr(index) + '].base_url" type="text" value="' + escAttr(upstream.base_url) + '" placeholder="https://.../v1"></div>'
+      + '<div class="config-row"><label for="cfg-upstream-envs-' + index + '">Key 环境变量</label><textarea id="cfg-upstream-envs-' + index + '" name="upstreams[' + escAttr(index) + '].api_key_envs" placeholder="一行一个环境变量名">' + esc(upstream.api_key_envs.join('\n')) + '</textarea></div>'
+      + '<div class="config-row"><label for="cfg-upstream-key-values-' + index + '">新 API Key</label><textarea id="cfg-upstream-key-values-' + index + '" name="upstreams[' + escAttr(index) + '].api_key_values" placeholder="留空不修改；与环境变量逐行对应">' + esc(upstream.api_key_values.join('\n')) + '</textarea></div>'
+      + '<div class="upstream-note">明文不会回显；填写后必须勾选“同时保存到 .env”。</div>'
+      + '<div class="config-row"><label for="cfg-upstream-default-' + index + '">默认模型</label><input id="cfg-upstream-default-' + index + '" name="upstreams[' + escAttr(index) + '].default_model" type="text" value="' + escAttr(upstream.default_model) + '"></div>'
+      + '<div class="config-row"><label for="cfg-upstream-cache-' + index + '">Prompt Cache</label><select id="cfg-upstream-cache-' + index + '" name="upstreams[' + escAttr(index) + '].prompt_cache"><option value=""' + (!upstream.prompt_cache ? ' selected' : '') + '>关闭</option><option value="openai"' + (upstream.prompt_cache === 'openai' ? ' selected' : '') + '>openai</option><option value="anthropic"' + (upstream.prompt_cache === 'anthropic' ? ' selected' : '') + '>anthropic</option><option value="anthropic_explicit"' + (upstream.prompt_cache === 'anthropic_explicit' ? ' selected' : '') + '>anthropic_explicit</option></select></div>'
+      + '<div class="config-row"><label for="cfg-upstream-cache-retention-' + index + '">Cache Retention</label><input id="cfg-upstream-cache-retention-' + index + '" name="upstreams[' + escAttr(index) + '].prompt_cache_retention" type="text" value="' + escAttr(upstream.prompt_cache_retention) + '" placeholder="5m / 1h"></div>'
+      + '<div class="config-row"><label for="cfg-upstream-anthropic-version-' + index + '">Anthropic Version</label><input id="cfg-upstream-anthropic-version-' + index + '" name="upstreams[' + escAttr(index) + '].anthropic_version" type="text" value="' + escAttr(upstream.anthropic_version) + '" placeholder="2023-06-01"></div>'
+      + '<div class="config-row"><label for="cfg-upstream-anthropic-beta-' + index + '">Anthropic Beta</label><input id="cfg-upstream-anthropic-beta-' + index + '" name="upstreams[' + escAttr(index) + '].anthropic_beta" type="text" value="' + escAttr(upstream.anthropic_beta) + '"></div>'
+      + '<div class="upstream-models"><div class="upstream-card-head"><div class="upstream-card-title">模型映射</div><button type="button" class="btn-secondary" aria-label="添加模型映射" title="添加模型映射" onclick="addExtendedUpstreamModel(' + index + ')">＋ 模型</button></div>' + modelRows + '</div>'
+      + '<div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn-secondary" aria-label="删除上游" title="删除上游" onclick="removeExtendedUpstream(' + index + ')">删除上游</button></div>'
+      + '</div>';
+  }).join('');
+}
+
+function addExtendedUpstream() {
+  extendedUpstreams = collectExtendedUpstreams();
+  extendedUpstreams.push(normalizeExtendedUpstream({}, extendedUpstreams.length));
+  renderExtendedUpstreams();
+}
+
+function removeExtendedUpstream(index) {
+  extendedUpstreams = collectExtendedUpstreams();
+  extendedUpstreams.splice(index, 1);
+  renderExtendedUpstreams();
+}
+
+function addExtendedUpstreamModel(index) {
+  extendedUpstreams = collectExtendedUpstreams(true);
+  if (!extendedUpstreams[index]) return;
+  extendedUpstreams[index].models.push({id:'', upstream_model:''});
+  renderExtendedUpstreams();
+}
+
+function removeExtendedUpstreamModel(index, modelIndex) {
+  extendedUpstreams = collectExtendedUpstreams(true);
+  if (!extendedUpstreams[index]) return;
+  extendedUpstreams[index].models.splice(modelIndex, 1);
+  renderExtendedUpstreams();
+}
+
+function loadExtendedConfig(cfg) {
+  var gateway = cfg.gateway || {};
+  var reranker = cfg.reranker || {};
+  var persona = cfg.persona || {};
+  var reflection = cfg.reflection || {};
+  var dream = cfg.dream || {};
+  var portrait = cfg.portrait || {};
+  var recall = cfg.recall || {};
+  var diffusion = cfg.memory_diffusion || {};
+  var selfAnchor = cfg.self_anchor || {};
+
+  cfgBool('cfg-domain-sentinel-enabled', gateway.domain_sentinel_enabled, false);
+  cfgSet('cfg-domain-sentinel-model', gateway.domain_sentinel_model, '');
+  cfgSet('cfg-domain-sentinel-base-url', gateway.domain_sentinel_base_url, '');
+  cfgBool('cfg-domain-sentinel-thinking', gateway.domain_sentinel_enable_thinking, false);
+  cfgSet('cfg-domain-sentinel-max-tokens', gateway.domain_sentinel_max_tokens, 512);
+  var sentinelKey = document.getElementById('cfg-domain-sentinel-api-key');
+  if (sentinelKey) { sentinelKey.value = ''; sentinelKey.placeholder = gateway.domain_sentinel_api_key_masked ? ('当前：' + gateway.domain_sentinel_api_key_masked + '（留空 = 不修改）') : '未设置（留空 = 不修改）'; }
+
+  cfgBool('cfg-reranker-enabled', reranker.enabled, false); cfgSet('cfg-reranker-model', reranker.model, ''); cfgSet('cfg-reranker-base-url', reranker.base_url, '');
+  cfgSet('cfg-reranker-candidate-limit', reranker.candidate_limit, 20); cfgSet('cfg-reranker-score-weight', reranker.score_weight, 0.35); cfgSecret('cfg-reranker-api-key', reranker);
+  cfgBool('cfg-persona-enabled', persona.enabled, false); cfgBool('cfg-persona-event-recording', persona.event_recording_enabled, true); cfgBool('cfg-persona-conflict-nudge', persona.conflict_nudge_enabled, true); cfgSet('cfg-persona-model', persona.model, ''); cfgSet('cfg-persona-base-url', persona.base_url, ''); cfgSecret('cfg-persona-api-key', persona);
+  cfgBool('cfg-reflection-enabled', reflection.enabled, false); cfgBool('cfg-reflection-auto', reflection.auto_enabled, false); cfgBool('cfg-reflection-daily', reflection.daily_enabled, false); cfgSet('cfg-reflection-model', reflection.model, ''); cfgSet('cfg-reflection-base-url', reflection.base_url, ''); cfgSet('cfg-reflection-thinking', reflection.thinking_mode, ''); cfgSecret('cfg-reflection-api-key', reflection);
+  cfgBool('cfg-daily-memory-summary-enabled', reflection.daily_chat_memory_summary_enabled, true); cfgSet('cfg-daily-memory-mode', reflection.daily_chat_memory_mode, 'review'); cfgSet('cfg-daily-memory-hour', reflection.daily_chat_memory_hour, 0); cfgSet('cfg-daily-memory-turn-limit', reflection.daily_chat_memory_turn_limit, 0); cfgSet('cfg-daily-memory-max-per-day', reflection.daily_chat_memory_max_per_day, 10); cfgSet('cfg-daily-memory-min-confidence', reflection.daily_chat_memory_min_confidence, 0.68); cfgSet('cfg-daily-memory-review-max-per-day', reflection.daily_chat_memory_review_max_per_day, 10); cfgSet('cfg-daily-memory-review-min-confidence', reflection.daily_chat_memory_review_min_confidence, 0.55); cfgSet('cfg-daily-memory-summary-model', reflection.daily_chat_memory_summary_model, ''); cfgSet('cfg-daily-memory-candidate-model', reflection.daily_chat_memory_candidate_model, ''); cfgSet('cfg-daily-memory-base-url', reflection.daily_chat_memory_base_url, ''); cfgSet('cfg-daily-memory-api-key-env', reflection.daily_chat_memory_api_key_env, ''); cfgSet('cfg-daily-memory-timeout', reflection.daily_chat_memory_timeout_seconds, 180); cfgSet('cfg-daily-memory-summary-max-tokens', reflection.daily_chat_memory_summary_max_tokens, 2200); cfgSet('cfg-daily-memory-candidate-max-tokens', reflection.daily_chat_memory_candidate_max_tokens, 3200); cfgSet('cfg-daily-memory-summary-window', reflection.daily_chat_memory_summary_window_turns, 14); cfgSet('cfg-daily-memory-summary-stride', reflection.daily_chat_memory_summary_stride_turns, 7);
+  cfgBool('cfg-dream-enabled', dream.enabled, false); cfgBool('cfg-dream-auto', dream.auto_enabled, false); cfgBool('cfg-dream-surface', dream.surface_enabled, true); cfgBool('cfg-dream-inject', dream.inject_enabled, false); cfgSet('cfg-dream-model', dream.model, ''); cfgSet('cfg-dream-base-url', dream.base_url, ''); cfgSet('cfg-dream-thinking', dream.thinking_mode, ''); cfgSecret('cfg-dream-api-key', dream);
+  cfgBool('cfg-portrait-enabled', portrait.enabled, false); cfgBool('cfg-portrait-auto', portrait.auto_enabled, false); cfgBool('cfg-portrait-initial', portrait.auto_initial_enabled, false); cfgBool('cfg-portrait-daily', portrait.daily_enabled, false); cfgSet('cfg-portrait-model', portrait.model, ''); cfgSet('cfg-portrait-base-url', portrait.base_url, ''); cfgSecret('cfg-portrait-api-key', portrait);
+
+  var recentBudget = Number(gateway.recent_context_budget || 0);
+  var personaRounds = Number(gateway.current_inner_state_interval_rounds || 0);
+  cfgBool('cfg-ext-recent-enabled', recentBudget > 0, false); cfgSet('cfg-ext-recent-budget', recentBudget, 0);
+  cfgBool('cfg-ext-persona-context-enabled', personaRounds > 0, false); cfgSet('cfg-ext-persona-context-rounds', personaRounds, 0);
+  cfgSet('cfg-ext-cooldown', gateway.cooldown_hours, 0); cfgSet('cfg-ext-skip-rounds', gateway.skip_recent_rounds, 0); cfgSet('cfg-ext-recent-cooldown', gateway.recent_context_cooldown_hours, 0); cfgSet('cfg-ext-reentry', gateway.recent_context_reentry_idle_hours, 0);
+  cfgSet('cfg-ext-recalled-budget', gateway.recalled_memory_budget, 0); cfgSet('cfg-ext-related-budget', gateway.related_memory_budget, 0); cfgBool('cfg-ext-detail-enabled', gateway.memory_detail_recall_enabled, false); cfgSet('cfg-ext-detail-max-ids', gateway.memory_detail_recall_max_ids, 8); cfgSet('cfg-ext-detail-budget', gateway.memory_detail_recall_budget, 0);
+  cfgSet('cfg-ext-render-mode', gateway.direct_render_mode, 'auto'); cfgSet('cfg-ext-retrieval-mode', gateway.retrieval_mode, 'graph'); cfgBool('cfg-ext-rewrite', gateway.operit_context_rewrite_enabled, false); cfgBool('cfg-ext-word-map-hint', gateway.word_map_hint_enabled, false); cfgBool('cfg-ext-query-planner', gateway.query_planner_enabled, false);
+  cfgBool('cfg-recall-resurface', recall.query_resurface_enabled, false);
+  cfgBool('cfg-diffusion-enabled', diffusion.enabled, false); cfgSet('cfg-diffusion-top-k', diffusion.top_k, 3); cfgSet('cfg-diffusion-min-activation', diffusion.min_activation, 0); cfgBool('cfg-diffusion-chain-enabled', diffusion.chain_walk_enabled, false); cfgSet('cfg-diffusion-chain-hops', diffusion.chain_max_hops, 3); cfgSet('cfg-diffusion-chain-confidence', diffusion.chain_min_confidence, 0.35); cfgSet('cfg-diffusion-chain-frontier', diffusion.chain_max_frontier, 24);
+  cfgSet('cfg-self-anchor-entry', selfAnchor.entry_bucket_id, '');
+
+  extendedUpstreams = Array.isArray(gateway.upstreams) ? gateway.upstreams.map(normalizeExtendedUpstream) : [];
+  renderExtendedUpstreams();
+}
+
 async function loadConfig() {
+  var options = arguments[0] || {};
+  var generation = ++configLoadGeneration;
+  configStateReady = false;
   try {
     var res = await authFetch('/api/config');
     if (!res) return;
-    var cfg = await res.json();
+    if (generation !== configLoadGeneration) return;
+    var cfg = await readJsonSafe(res);
+    if (!res.ok || !cfg || typeof cfg !== 'object') throw new Error((cfg && cfg.error) || ('HTTP ' + res.status));
+    if (generation !== configLoadGeneration) return;
     loadOwnerBadge(cfg);
     document.getElementById('cfg-dehy-model').value = cfg.dehydration.model || '';
     document.getElementById('cfg-dehy-url').value = cfg.dehydration.base_url || '';
@@ -7931,7 +8529,7 @@ async function loadConfig() {
     backendSel.onchange = renderNote;
     // 加载当前 embedding 后端摘要 + 启动迁移轮询（只刷一次摘要，迁移状态独立轮询）
     refreshEmbInfo();
-    refreshEnvConfig();
+    if (options.refreshEnv !== false) refreshEnvConfig();
     document.getElementById('cfg-merge').value = cfg.merge_threshold != null
       ? cfg.merge_threshold : 75;
     var mcpAuthEl = document.getElementById('cfg-mcp-auth');
@@ -7980,6 +8578,7 @@ async function loadConfig() {
     document.getElementById('cfg-sf-breath-tokens').value = sf.breath_max_tokens || 10000;
     document.getElementById('cfg-sf-feel-tokens').value = sf.feel_max_tokens || 15000;
     document.getElementById('cfg-timezone').value = cfg.timezone || 'Asia/Shanghai';
+    loadExtendedConfig(cfg);
     document.getElementById('config-readonly').innerHTML =
       'Transport（已保存）: <strong>' + esc(cfg.transport) + '</strong>'
       + '<br>Transport（当前生效）: <strong>' + esc(cfg.transport_effective || cfg.transport) + '</strong>'
@@ -7987,9 +8586,13 @@ async function loadConfig() {
       + '<br>运行环境: <strong>' + (cfg.in_docker ? 'Docker 容器' : '裸机') + '</strong>'
       + '<br>对外端口: <strong>' + esc(cfg.host_port || '18001（默认）') + '</strong>';
     if (cfg.transport) highlightTransport(cfg.transport);
+    if (generation === configLoadGeneration) configStateReady = true;
   } catch (e) {
-    document.getElementById('config-status').innerHTML =
-      '<span style="color:var(--negative)">加载失败: ' + esc(e.message) + '</span>';
+    if (generation === configLoadGeneration) {
+      configStateReady = false;
+      document.getElementById('config-status').innerHTML =
+        '<span style="color:var(--negative)">加载失败: ' + esc(e.message) + '</span>';
+    }
   }
 }
 
@@ -8251,10 +8854,23 @@ async function saveEmbedKey() {
 }
 
 async function saveConfig(persist) {
+  if (!configStateReady) {
+    var notReadyStatus = document.getElementById('config-status');
+    var notReadyExtended = document.getElementById('extended-config-status');
+    var notReadyHtml = '<span style="color:var(--warning)">配置尚未加载完成，请稍后重试 / Configuration is still loading</span>';
+    if (notReadyStatus) notReadyStatus.innerHTML = notReadyHtml;
+    if (notReadyExtended) notReadyExtended.innerHTML = notReadyHtml;
+    return;
+  }
+  // A refresh finishing after the user pressed Save must not put stale values
+  // back into the controls while the request is being submitted.
+  configLoadGeneration += 1;
   var dehyTemperatureRaw = document.getElementById('cfg-dehy-temp').value.trim();
   var mergeThresholdRaw = document.getElementById('cfg-merge').value.trim();
   var dehyTemperature = dehyTemperatureRaw === '' ? NaN : Number(dehyTemperatureRaw);
   var mergeThreshold = mergeThresholdRaw === '' ? NaN : Number(mergeThresholdRaw);
+  var recentEnabled = cfgText('cfg-ext-recent-enabled') === 'true';
+  var personaContextEnabled = cfgText('cfg-ext-persona-context-enabled') === 'true';
   var body = {
     dehydration: {
       model: document.getElementById('cfg-dehy-model').value,
@@ -8276,26 +8892,102 @@ async function saveConfig(persist) {
       breath_max_tokens: parseInt(document.getElementById('cfg-sf-breath-tokens').value) || 10000,
       feel_max_tokens: parseInt(document.getElementById('cfg-sf-feel-tokens').value) || 15000,
     },
+    gateway: {
+      domain_sentinel_enabled: cfgText('cfg-domain-sentinel-enabled') === 'true',
+      domain_sentinel_model: cfgText('cfg-domain-sentinel-model'),
+      domain_sentinel_base_url: cfgText('cfg-domain-sentinel-base-url'),
+      domain_sentinel_enable_thinking: cfgText('cfg-domain-sentinel-thinking') === 'true',
+      domain_sentinel_max_tokens: cfgNum('cfg-domain-sentinel-max-tokens', 512),
+      recent_context_budget: recentEnabled ? cfgNum('cfg-ext-recent-budget', 2000) : 0,
+      current_inner_state_interval_rounds: personaContextEnabled ? cfgNum('cfg-ext-persona-context-rounds', 8) : 0,
+      cooldown_hours: cfgNum('cfg-ext-cooldown', 0),
+      skip_recent_rounds: cfgNum('cfg-ext-skip-rounds', 0),
+      recent_context_cooldown_hours: cfgNum('cfg-ext-recent-cooldown', 0),
+      recent_context_reentry_idle_hours: cfgNum('cfg-ext-reentry', 0),
+      recalled_memory_budget: cfgNum('cfg-ext-recalled-budget', 0),
+      related_memory_budget: cfgNum('cfg-ext-related-budget', 0),
+      memory_detail_recall_enabled: cfgText('cfg-ext-detail-enabled') === 'true',
+      memory_detail_recall_max_ids: cfgNum('cfg-ext-detail-max-ids', 8),
+      memory_detail_recall_budget: cfgNum('cfg-ext-detail-budget', 0),
+      direct_render_mode: cfgText('cfg-ext-render-mode') || 'auto',
+      retrieval_mode: cfgText('cfg-ext-retrieval-mode') || 'graph',
+      operit_context_rewrite_enabled: cfgText('cfg-ext-rewrite') === 'true',
+      word_map_hint_enabled: cfgText('cfg-ext-word-map-hint') === 'true',
+      query_planner_enabled: cfgText('cfg-ext-query-planner') === 'true',
+      upstreams: collectExtendedUpstreams(),
+    },
+    recall: {query_resurface_enabled: cfgText('cfg-recall-resurface') === 'true'},
+    memory_diffusion: {
+      enabled: cfgText('cfg-diffusion-enabled') === 'true',
+      top_k: cfgNum('cfg-diffusion-top-k', 3),
+      min_activation: cfgNum('cfg-diffusion-min-activation', 0),
+      chain_walk_enabled: cfgText('cfg-diffusion-chain-enabled') === 'true',
+      chain_max_hops: cfgNum('cfg-diffusion-chain-hops', 3),
+      chain_min_confidence: cfgNum('cfg-diffusion-chain-confidence', 0.35),
+      chain_max_frontier: cfgNum('cfg-diffusion-chain-frontier', 24),
+    },
+    reranker: {
+      enabled: cfgText('cfg-reranker-enabled') === 'true', model: cfgText('cfg-reranker-model'), base_url: cfgText('cfg-reranker-base-url'),
+      candidate_limit: cfgNum('cfg-reranker-candidate-limit', 20), score_weight: cfgNum('cfg-reranker-score-weight', 0.35),
+    },
+    persona: {
+      enabled: cfgText('cfg-persona-enabled') === 'true', event_recording_enabled: cfgText('cfg-persona-event-recording') === 'true', conflict_nudge_enabled: cfgText('cfg-persona-conflict-nudge') === 'true', model: cfgText('cfg-persona-model'), base_url: cfgText('cfg-persona-base-url'),
+    },
+    reflection: {
+      enabled: cfgText('cfg-reflection-enabled') === 'true', auto_enabled: cfgText('cfg-reflection-auto') === 'true', daily_enabled: cfgText('cfg-reflection-daily') === 'true', model: cfgText('cfg-reflection-model'), base_url: cfgText('cfg-reflection-base-url'), thinking_mode: cfgText('cfg-reflection-thinking'), daily_chat_memory_summary_enabled: cfgText('cfg-daily-memory-summary-enabled') === 'true', daily_chat_memory_mode: cfgText('cfg-daily-memory-mode') || 'review', daily_chat_memory_hour: cfgNum('cfg-daily-memory-hour', 0), daily_chat_memory_turn_limit: cfgNum('cfg-daily-memory-turn-limit', 0), daily_chat_memory_max_per_day: cfgNum('cfg-daily-memory-max-per-day', 10), daily_chat_memory_min_confidence: cfgNum('cfg-daily-memory-min-confidence', 0.68), daily_chat_memory_review_max_per_day: cfgNum('cfg-daily-memory-review-max-per-day', 10), daily_chat_memory_review_min_confidence: cfgNum('cfg-daily-memory-review-min-confidence', 0.55), daily_chat_memory_summary_model: cfgText('cfg-daily-memory-summary-model'), daily_chat_memory_candidate_model: cfgText('cfg-daily-memory-candidate-model'), daily_chat_memory_base_url: cfgText('cfg-daily-memory-base-url'), daily_chat_memory_api_key_env: cfgText('cfg-daily-memory-api-key-env'), daily_chat_memory_timeout_seconds: cfgNum('cfg-daily-memory-timeout', 180), daily_chat_memory_summary_max_tokens: cfgNum('cfg-daily-memory-summary-max-tokens', 2200), daily_chat_memory_candidate_max_tokens: cfgNum('cfg-daily-memory-candidate-max-tokens', 3200), daily_chat_memory_summary_window_turns: cfgNum('cfg-daily-memory-summary-window', 14), daily_chat_memory_summary_stride_turns: cfgNum('cfg-daily-memory-summary-stride', 7),
+    },
+    dream: {
+      enabled: cfgText('cfg-dream-enabled') === 'true', auto_enabled: cfgText('cfg-dream-auto') === 'true', surface_enabled: cfgText('cfg-dream-surface') === 'true', inject_enabled: cfgText('cfg-dream-inject') === 'true', model: cfgText('cfg-dream-model'), base_url: cfgText('cfg-dream-base-url'), thinking_mode: cfgText('cfg-dream-thinking'),
+    },
+    portrait: {
+      enabled: cfgText('cfg-portrait-enabled') === 'true', auto_enabled: cfgText('cfg-portrait-auto') === 'true', auto_initial_enabled: cfgText('cfg-portrait-initial') === 'true', daily_enabled: cfgText('cfg-portrait-daily') === 'true', model: cfgText('cfg-portrait-model'), base_url: cfgText('cfg-portrait-base-url'),
+    },
+    self_anchor: {entry_bucket_id: cfgText('cfg-self-anchor-entry')},
     timezone: (document.getElementById('cfg-timezone').value || '').trim(),
     persist: persist,
+    persist_env: !!(document.getElementById('cfg-extended-persist-env') || {}).checked,
   };
+  var secretFields = [
+    ['cfg-domain-sentinel-api-key', body.gateway, 'domain_sentinel_api_key'],
+    ['cfg-reranker-api-key', body.reranker, 'api_key'], ['cfg-persona-api-key', body.persona, 'api_key'],
+    ['cfg-reflection-api-key', body.reflection, 'api_key'], ['cfg-dream-api-key', body.dream, 'api_key'], ['cfg-portrait-api-key', body.portrait, 'api_key'],
+  ];
+  secretFields.forEach(function(spec) { var value = cfgText(spec[0]); if (value) spec[1][spec[2]] = value; });
+
   var status = document.getElementById('config-status');
+  var extendedStatus = document.getElementById('extended-config-status');
+  if (configSaveInFlight) return;
+  configSaveInFlight = true;
+  var configSaveButtons = Array.from(document.querySelectorAll('[data-config-save="true"]'));
+  configSaveButtons.forEach(function(button) {
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+  });
   try {
-    var res = await authFetch('/api/config', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    });
+    var res = await authFetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}, false);
     if (!res) return;
-    var result = await res.json();
-    if (result.ok) {
-      status.innerHTML = '<span style="color:var(--positive)">' + _SV.ok + ' 已更新: ' + esc((result.updated || []).join(', ')) + '</span>';
+    var result = await readJsonSafe(res);
+    if (res.ok && result && result.ok) {
+      var warningHtml = (result.warnings || []).length ? '<br><span style="color:var(--warning)">' + esc(result.warnings.join('；')) + '</span>' : '';
+      var okHtml = '<span style="color:var(--positive)">' + _SV.ok + ' 已更新: ' + esc((result.updated || []).join(', ')) + '</span>' + warningHtml;
+      if (status) status.innerHTML = okHtml;
+      if (extendedStatus) extendedStatus.innerHTML = okHtml;
       loadConfig();
     } else {
-      status.innerHTML = '<span style="color:var(--negative)">' + _SV.err + ' ' + esc(result.error || '未知错误') + '</span>';
+      var errorHtml = '<span style="color:var(--negative)">' + _SV.err + ' ' + esc(result.error || '未知错误') + '</span>';
+      if (status) status.innerHTML = errorHtml;
+      if (extendedStatus) extendedStatus.innerHTML = errorHtml;
     }
   } catch (e) {
-    status.innerHTML = '<span style="color:var(--negative)">' + _SV.err + ' 请求失败: ' + esc(e.message) + '</span>';
+    var failedHtml = '<span style="color:var(--negative)">' + _SV.err + ' 请求失败: ' + esc(e.message) + '</span>';
+    if (status) status.innerHTML = failedHtml;
+    if (extendedStatus) extendedStatus.innerHTML = failedHtml;
+  } finally {
+    configSaveInFlight = false;
+    configSaveButtons.forEach(function(button) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    });
   }
 }
 
@@ -8723,6 +9415,597 @@ async function planEdit(id) {
   } catch(e) { alert('编辑失败: ' + e.message); }
 }
 
+// ====== Care / 照顾：旧 Haven 只读能力的兼容聚合 ======
+let careLoadGeneration = 0;
+let careDetailGeneration = 0;
+let careReminderLoadGeneration = 0;
+let carePersonaLoadGeneration = 0;
+let careReminderSaveInFlight = false;
+
+function careText(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback || '';
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value, null, 2); } catch (e) { return fallback || ''; }
+  }
+  return String(value);
+}
+
+function careFirst(obj, keys, fallback) {
+  if (!obj || typeof obj !== 'object') return fallback || '';
+  for (const key of keys) {
+    if (obj[key] !== null && obj[key] !== undefined && obj[key] !== '') return obj[key];
+  }
+  return fallback || '';
+}
+
+function careItems(data, keys) {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== 'object') return [];
+  for (const key of keys || []) if (Array.isArray(data[key])) return data[key];
+  return [];
+}
+
+function careSetCount(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text || '';
+}
+
+function careLoading(id) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = '<div class="care-empty">加载中… / Loading…</div>';
+}
+
+function renderCareUnavailable(id, message) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = '<div class="care-unavailable">暂不可用 / Unavailable<br><span style="font-size:11px;">' + esc(message || '兼容 API 未返回可读数据') + '</span></div>';
+}
+
+async function careFetchJson(url) {
+  const resp = await authFetch(url);
+  if (!resp) throw new Error('需要登录或认证已过期 / Authentication required');
+  const data = await readJsonSafe(resp);
+  if (!resp.ok || (data && data.error)) throw new Error((data && data.error) || ('HTTP ' + resp.status));
+  return data;
+}
+
+function careRenderItems(id, items, emptyText, renderItem) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!items.length) { el.innerHTML = '<div class="care-empty">' + esc(emptyText) + '</div>'; return; }
+  el.innerHTML = items.map(renderItem).join('');
+}
+
+
+let careReminderStatus = 'active';
+let careReminderEditingId = '';
+let careReminderItems = {};
+let careMomentsData = [];
+let carePendingItems = [];
+let careMomentsMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let careMomentsMonthPinned = false;
+let careSelectedMomentDate = '';
+let carePersonaData = null;
+let carePersonaSelectedSession = '';
+
+function careDateKey(value) {
+  const match = String(value || '').match(/(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : '';
+}
+
+function setCareReminderFilter(status) {
+  const validStatuses = ['active', 'done', 'archived', 'all'];
+  careReminderStatus = validStatuses.includes(status) ? status : 'active';
+  document.querySelectorAll('[data-care-reminder-status]').forEach(function(button) {
+    const active = button.getAttribute('data-care-reminder-status') === careReminderStatus;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  return loadCareReminders();
+}
+
+function editCareReminder(id) {
+  const item = careReminderItems[String(id)];
+  if (!item) {
+    const status = document.getElementById('care-status');
+    if (status) status.textContent = '找不到这条备忘 / Memo not found';
+    return;
+  }
+  toggleCareReminderForm(item);
+}
+
+function toggleCareReminderForm(item) {
+  const form = document.getElementById('care-reminder-form');
+  if (!form) return;
+  careReminderEditingId = item && item.id != null ? String(item.id) : '';
+  const fields = {
+    title: item ? careFirst(item, ['title', 'name'], '') : '',
+    content: item ? careText(careFirst(item, ['content', 'text'], ''), '') : '',
+    repeat: item ? careFirst(item, ['repeat_rule'], 'every_n_rounds') : 'every_n_rounds',
+    start: item ? careFirst(item, ['start_at'], '') : '',
+    end: item ? careFirst(item, ['end_at'], '') : '',
+    next: item ? careFirst(item, ['next_due_at'], '') : '',
+    rounds: item ? careFirst(item, ['interval_rounds'], 6) : 6,
+    daily: item ? careFirst(item, ['daily_limit'], 1) : 1,
+    max: item ? careFirst(item, ['max_injections'], 0) : 0,
+  };
+  ['title','content','start','end','next','rounds','daily','max'].forEach(function(key) {
+    const el = document.getElementById('care-reminder-' + key);
+    if (el) el.value = fields[key] == null ? '' : fields[key];
+  });
+  const repeat = document.getElementById('care-reminder-repeat');
+  if (repeat) repeat.value = fields.repeat;
+  const message = document.getElementById('care-reminder-form-message');
+  if (message) message.textContent = careReminderEditingId ? '编辑照顾备忘 / Edit memo' : '新增照顾备忘 / New memo';
+  form.classList.add('open');
+  const title = document.getElementById('care-reminder-title');
+  if (title) title.focus();
+}
+
+function closeCareReminderForm() {
+  const form = document.getElementById('care-reminder-form');
+  if (form) form.classList.remove('open');
+  careReminderEditingId = '';
+}
+
+async function saveCareReminder(event) {
+  if (event) event.preventDefault();
+  const message = document.getElementById('care-reminder-form-message');
+  const form = document.getElementById('care-reminder-form');
+  const titleEl = document.getElementById('care-reminder-title');
+  const contentEl = document.getElementById('care-reminder-content');
+  if (!titleEl || !contentEl || careReminderSaveInFlight) return;
+  try {
+    const title = titleEl.value.trim();
+    const content = contentEl.value.trim();
+    if (!title) throw new Error('标题不能为空 / Title is required');
+    if (!content) throw new Error('正文不能为空 / Content is required');
+    const repeat = (document.getElementById('care-reminder-repeat') || {}).value || 'every_n_rounds';
+    const numberValue = function(id) {
+      const raw = String((document.getElementById(id) || {}).value || '').trim();
+      if (raw === '') return 0;
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value < 0) throw new Error('数字字段必须是非负整数 / Non-negative integer required');
+      return value;
+    };
+    const payload = {
+      title: title,
+      content: content,
+      repeat_rule: repeat,
+      start_at: ((document.getElementById('care-reminder-start') || {}).value || '').trim(),
+      end_at: ((document.getElementById('care-reminder-end') || {}).value || '').trim(),
+      next_due_at: ((document.getElementById('care-reminder-next') || {}).value || '').trim(),
+      interval_rounds: numberValue('care-reminder-rounds'),
+      daily_limit: numberValue('care-reminder-daily'),
+      max_injections: numberValue('care-reminder-max'),
+    };
+    if (repeat === 'every_n_rounds' && payload.interval_rounds < 1) throw new Error('每隔几轮至少为 1 / Interval must be at least 1');
+    const editingId = careReminderEditingId;
+    const url = editingId ? '/api/reminders/' + encodeURIComponent(editingId) : '/api/reminders';
+    careReminderSaveInFlight = true;
+    if (form) form.setAttribute('aria-busy', 'true');
+    const submit = form && form.querySelector('button[type="submit"]');
+    if (submit) submit.disabled = true;
+    if (message) message.textContent = '保存中… / Saving…';
+    const resp = await authFetch(url, {method: editingId ? 'PATCH' : 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)}, false);
+    if (!resp) throw new Error('需要登录或认证已过期 / Authentication required');
+    const data = await readJsonSafe(resp);
+    if (!resp.ok || (data && data.error)) throw new Error((data && data.error) || ('HTTP ' + resp.status));
+    closeCareReminderForm();
+    await loadCareReminders();
+  } catch (e) {
+    if (message) message.textContent = '保存失败 / Failed: ' + (e && e.message ? e.message : e);
+  } finally {
+    careReminderSaveInFlight = false;
+    if (form) form.setAttribute('aria-busy', 'false');
+    const submit = form && form.querySelector('button[type="submit"]');
+    if (submit) submit.disabled = false;
+  }
+}
+
+async function careReminderPatch(id, patch) {
+  try {
+    const resp = await authFetch('/api/reminders/' + encodeURIComponent(id), {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(patch)}, false);
+    if (!resp) throw new Error('需要登录或认证已过期 / Authentication required');
+    const data = await readJsonSafe(resp);
+    if (!resp.ok || (data && data.error)) throw new Error((data && data.error) || ('HTTP ' + resp.status));
+    await loadCareReminders();
+  } catch (e) {
+    const status = document.getElementById('care-status');
+    if (status) status.textContent = '备忘操作失败 / Memo action failed: ' + e.message;
+  }
+}
+
+async function loadCareReminders() {
+  const generation = ++careReminderLoadGeneration;
+  const requestedStatus = careReminderStatus;
+  careLoading('care-reminders-content');
+  try {
+    const data = await careFetchJson('/api/reminders?status=' + encodeURIComponent(requestedStatus) + '&limit=50');
+    if (generation !== careReminderLoadGeneration || requestedStatus !== careReminderStatus) return;
+    renderCareReminders(data);
+  } catch (e) {
+    if (generation === careReminderLoadGeneration && requestedStatus === careReminderStatus) renderCareUnavailable('care-reminders-content', e.message);
+  }
+}
+
+function renderCareMomentsCalendar() {
+  const el = document.getElementById('care-moments-content');
+  if (!el) return;
+  const year = careMomentsMonth.getFullYear();
+  const month = careMomentsMonth.getMonth();
+  const monthText = document.getElementById('care-moments-month');
+  if (monthText) monthText.textContent = year + '-' + String(month + 1).padStart(2, '0');
+  const grouped = {};
+  careMomentsData.forEach(function(item) { const key = careDateKey(careFirst(item, ['date','created_at','updated_at','start_at'], '')); if (key) (grouped[key] ||= []).push(item); });
+  const first = new Date(year, month, 1).getDay();
+  const days = new Date(year, month + 1, 0).getDate();
+  let html = '<div class="care-calendar">' + ['日','一','二','三','四','五','六'].map(function(day) { return '<span class="weekday">' + day + '</span>'; }).join('');
+  for (let i = 0; i < first; i++) html += '<button class="empty" tabindex="-1"></button>';
+  for (let day = 1; day <= days; day++) {
+    const key = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+    const has = !!grouped[key];
+    html += '<button type="button" class="' + (has ? 'has-items ' : '') + (key === careSelectedMomentDate ? 'selected' : '') + '" data-care-action="select-date" data-care-date="' + escAttr(key) + '">' + day + (has ? ' ·' : '') + '</button>';
+  }
+  html += '</div>';
+  const selected = careSelectedMomentDate && grouped[careSelectedMomentDate] ? careSelectedMomentDate : Object.keys(grouped).sort().reverse().find(function(key) { return key.startsWith(year + '-' + String(month + 1).padStart(2, '0')); }) || '';
+  careSelectedMomentDate = selected;
+  const items = selected ? (grouped[selected] || []) : [];
+  html += selected ? '<div class="care-card-meta" style="margin-bottom:6px;">' + esc(selected) + '</div>' : '';
+  if (items.length) html += items.map(function(item) { const title = careText(careFirst(item, ['title','name','kind'], '日印象')); const body = careText(careFirst(item, ['text','content','summary','description'], '')); const index = careMomentsData.indexOf(item); return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span></div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + '<div class="care-item-actions"><button type="button" data-care-action="detail" data-care-kind="moment" data-care-index="' + escAttr(index) + '">展开详情</button></div></div>'; }).join('');
+  else html += '<div class="care-empty">该月暂无日印象 / No impression on this date</div>';
+  el.innerHTML = html;
+}
+
+function shiftCareMomentsMonth(delta) { careMomentsMonthPinned = true; careMomentsMonth = new Date(careMomentsMonth.getFullYear(), careMomentsMonth.getMonth() + delta, 1); renderCareMomentsCalendar(); }
+function selectCareMomentDate(date) { careMomentsMonthPinned = true; careSelectedMomentDate = date; renderCareMomentsCalendar(); }
+
+function renderCareReminders(data) {
+  const items = careItems(data, ['reminders', 'items']);
+  careReminderItems = {};
+  items.forEach(function(item) { if (item && item.id != null) careReminderItems[String(item.id)] = item; });
+  careSetCount('care-reminders-count', items.length + ' 条');
+  careRenderItems('care-reminders-content', items, '暂无照顾备忘 / No care memos', function(item) {
+    const id = careText(careFirst(item, ['id'], ''));
+    const title = careText(careFirst(item, ['title', 'name'], '未命名备忘'));
+    const body = careText(careFirst(item, ['content', 'text', 'note'], ''));
+    const due = careText(careFirst(item, ['next_due_at', 'start_at', 'created_at'], ''));
+    const status = careText(careFirst(item, ['status'], 'active'));
+    const actions = id ? '<div class="care-item-actions">' +
+      '<button type="button" data-care-action="edit-reminder" data-care-id="' + escAttr(id) + '">编辑</button>' +
+      (status === 'active' ? '<button type="button" data-care-action="patch-reminder" data-care-id="' + escAttr(id) + '" data-care-status="done">完成</button><button type="button" data-care-action="snooze-reminder" data-care-id="' + escAttr(id) + '">稍后 30 分钟</button><button type="button" data-care-action="patch-reminder" data-care-id="' + escAttr(id) + '" data-care-status="archived">归档</button>' : '<button type="button" data-care-action="patch-reminder" data-care-id="' + escAttr(id) + '" data-care-status="active">恢复</button>') +
+      '</div>' : '';
+    return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span>' + (due ? '<span class="care-item-time">' + esc(due) + '</span>' : '') + '</div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + actions + '</div>';
+  });
+}
+
+function renderCareMoments(data) {
+  careMomentsData = careItems(data, ['moments', 'items', 'impressions', 'results']);
+  if (!careMomentsMonthPinned) {
+    const latest = careMomentsData.map(function(item) { return careDateKey(careFirst(item, ['date', 'created_at', 'updated_at', 'start_at'], '')); }).filter(Boolean).sort().reverse()[0] || '';
+    const match = latest.match(/^(\d{4})-(\d{2})-/);
+    if (match) careMomentsMonth = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  }
+  careSetCount('care-moments-count', careMomentsData.length + ' 条');
+  renderCareMomentsCalendar();
+}
+
+function renderCarePending(data) {
+  const items = careItems(data, ['items', 'pending', 'candidates']);
+  carePendingItems = items;
+  careSetCount('care-pending-count', items.length + ' 条 · 只读待审');
+  careRenderItems('care-pending-content', items, '暂无待审候选 / No pending candidates', function(item) {
+    const title = careText(careFirst(item, ['title', 'name', 'kind'], '自动记忆候选'));
+    const body = careText(careFirst(item, ['content', 'text', 'summary'], ''));
+    const meta = careText(careFirst(item, ['created_at', 'date', 'bucket_id', 'id'], ''));
+    const index = carePendingItems.indexOf(item);
+    const detail = '<button type="button" data-care-action="detail" data-care-kind="pending" data-care-index="' + escAttr(index) + '">查看候选</button>';
+    return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span>' + (meta ? '<span class="care-item-time">' + esc(meta) + '</span>' : '') + '</div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + '<div class="care-item-actions">' + detail + '</div></div>';
+  });
+}
+
+async function loadCarePersonaForSession(sessionId) {
+  carePersonaSelectedSession = sessionId ? String(sessionId) : '';
+  const generation = ++carePersonaLoadGeneration;
+  const requestedSession = carePersonaSelectedSession;
+  try {
+    const suffix = requestedSession ? '&session_id=' + encodeURIComponent(requestedSession) : '';
+    const data = await careFetchJson('/api/persona?events_limit=8&sessions_limit=4' + suffix);
+    if (generation !== carePersonaLoadGeneration || requestedSession !== carePersonaSelectedSession) return;
+    renderCarePersona(data);
+  } catch (e) {
+    if (generation === carePersonaLoadGeneration && requestedSession === carePersonaSelectedSession) renderCareUnavailable('care-persona-content', e.message);
+  }
+}
+
+function renderCareDreams(data) {
+  const items = careItems(data, ['dreams', 'items', 'records', 'results']);
+  careSetCount('care-dreams-count', items.length + ' 条');
+  careRenderItems('care-dreams-content', items, '暂无梦境元数据 / No dream metadata', function(item) {
+    const id = careText(careFirst(item, ['id', 'dream_id'], ''));
+    const title = careText(careFirst(item, ['title', 'name', 'label', 'dream_id'], '梦境'));
+    const body = careText(careFirst(item, ['summary', 'text', 'content', 'description'], ''));
+    const time = careText(careFirst(item, ['created_at', 'generated_at', 'local_date', 'date', 'dreamed_at', 'updated_at'], ''));
+    const button = id ? '<button type="button" data-care-action="open-dream" data-care-id="' + escAttr(id) + '">查看详情</button>' : '';
+    return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span>' + button + (time ? '<span class="care-item-time">' + esc(time) + '</span>' : '') + '</div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + '</div>';
+  });
+}
+
+function renderCarePersona(data) {
+  const el = document.getElementById('care-persona-content');
+  if (!el) return;
+  const obj = data && typeof data === 'object' ? data : {};
+  carePersonaData = obj;
+  const sessions = careItems(obj, ['sessions', 'recent_sessions']);
+  const events = careItems(obj, ['events', 'recent_events', 'event_log']);
+  const rawState = careFirst(obj, ['state', 'persona', 'current'], {});
+  const state = rawState && typeof rawState === 'object' ? rawState : {};
+  const requestedSession = carePersonaSelectedSession || careFirst(obj, ['session_id'], '');
+  const activeRow = sessions.find(function(session) {
+    return String(careFirst(session, ['session_id', 'id'], '')) === String(requestedSession || '');
+  }) || sessions[0] || null;
+  const nestedAffect = state.affect && typeof state.affect === 'object' ? state.affect : null;
+  const affect = nestedAffect || (activeRow && activeRow.affect && typeof activeRow.affect === 'object' ? activeRow.affect : activeRow) || {};
+  const relationship = state.relationship && typeof state.relationship === 'object' ? state.relationship : state;
+  const personality = state.personality && typeof state.personality === 'object' ? state.personality : state;
+  const activeSession = String(requestedSession || (activeRow && careFirst(activeRow, ['session_id', 'id'], '')) || '');
+  const mood = careFirst(affect, ['mood_label'], careFirst(state, ['mood_label'], ''));
+  const profileId = careFirst(obj, ['profile_id'], careFirst(state, ['profile_id'], careFirst(activeRow, ['profile_id'], '')));
+  const updatedAt = careFirst(affect, ['updated_at'], careFirst(activeRow, ['updated_at'], careFirst(state, ['updated_at'], '')));
+  const sessionSelect = document.getElementById('care-persona-session');
+  const config = obj.config && typeof obj.config === 'object' ? obj.config : {};
+  if (sessionSelect) {
+    const sessionIds = sessions.map(function(session) { return String(careFirst(session, ['session_id', 'id'], '')); }).filter(Boolean);
+    const current = activeSession;
+    const currentOption = current && !sessionIds.includes(current) ? '<option value="' + escAttr(current) + '">' + esc(current) + '</option>' : '';
+    sessionSelect.innerHTML = '<option value="">当前 session</option>' + currentOption + sessions.map(function(session) {
+      const id = careText(careFirst(session, ['session_id', 'id'], ''));
+      return id ? '<option value="' + escAttr(id) + '">' + esc(id) + '</option>' : '';
+    }).join('');
+    if (current) sessionSelect.value = current;
+  }
+  careSetCount('care-persona-count', (events.length ? events.length + ' events' : '') + (sessions.length ? (events.length ? ' · ' : '') + sessions.length + ' sessions' : (profileId ? 'state' : '')));
+
+  const labels = {
+    valence: '愉悦度', arousal: '唤醒度', tenderness: '温柔度', possessiveness: '占有感',
+    longing: '想念', security: '安全感', protective_drive: '保护欲', libido: '欲望温度',
+    affinity: '亲和', dominance: '主动性', defensiveness: '防御', trust: '信任',
+    openness: '开放性', conscientiousness: '尽责性', extraversion: '外向性',
+    agreeableness: '宜人性', neuroticism: '敏感性'
+  };
+  function numberValue(value) {
+    if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) return null;
+    return Math.max(0, Math.min(1, Number(value)));
+  }
+  function metric(key, source) {
+    const value = numberValue(source && source[key]);
+    if (value === null) return '';
+    const percent = Math.round(value * 100);
+    return '<div class="care-metric"><div class="care-metric-line"><span>' + esc(labels[key] || key) + '</span><strong>' + percent + '%</strong></div><div class="care-meter"><div class="care-meter-fill" style="width:' + percent + '%"></div></div></div>';
+  }
+  function group(title, keys, source) {
+    const metrics = keys.map(function(key) { return metric(key, source); }).filter(Boolean);
+    return metrics.length ? '<div class="care-metric-group"><div class="care-metric-group-title">' + esc(title) + '</div><div class="care-metrics">' + metrics.join('') + '</div></div>' : '';
+  }
+
+  let html = '<div class="care-item">' +
+    '<div class="care-item-title"><span>' + esc(mood || 'warm_neutral') + '</span>' +
+    (profileId ? '<span class="care-item-time">' + esc(profileId) + '</span>' : '') + '</div>' +
+    '<div class="care-chips" style="margin-top:8px;">' +
+    (activeSession ? '<span class="care-chip"><strong>会话</strong> ' + esc(activeSession) + '</span>' : '') +
+    (updatedAt ? '<span class="care-chip"><strong>更新</strong> ' + esc(updatedAt) + '</span>' : '') +
+    '<span class="care-chip"><strong>引擎</strong> ' + esc(config.enabled === false ? 'paused' : 'on') + '</span>' +
+    '</div>' +
+    group('情绪 / Affect', ['valence', 'arousal', 'tenderness', 'longing', 'security', 'protective_drive', 'possessiveness', 'libido'], affect) +
+    group('关系 / Relationship', ['affinity', 'trust', 'dominance', 'defensiveness'], relationship) +
+    group('人格基线 / Personality', ['openness', 'conscientiousness', 'extraversion', 'agreeableness', 'neuroticism'], personality) +
+    '</div>';
+
+  const note = careFirst(affect, ['inner_thought', 'residue'], careFirst(state, ['inner_thought', 'residue'], ''));
+  if (note) html += '<div class="care-note"><strong>当前余味</strong><br>' + esc(careText(note)) + '</div>';
+  if (events.length || sessions.length) {
+    html += '<div class="care-chips" style="margin-top:10px;">' +
+      '<span class="care-chip"><strong>事件</strong> ' + esc(careText(events.length)) + '</span>' +
+      '<span class="care-chip"><strong>会话</strong> ' + esc(careText(sessions.length)) + '</span></div>';
+  }
+  if (!profileId && !mood && !events.length && !sessions.length) html = '<div class="care-empty">Persona 暂无可读摘要 / No readable Persona summary</div>';
+  el.innerHTML = html;
+}
+function renderCarePortrait(data) {
+  const el = document.getElementById('care-portrait-content');
+  if (!el) return;
+  const obj = data && typeof data === 'object' ? data : {};
+  const state = obj.state && typeof obj.state === 'object' ? obj.state : obj;
+  const portrait = obj.portrait && typeof obj.portrait === 'object' ? obj.portrait : (state.portrait && typeof state.portrait === 'object' ? state.portrait : {});
+  const focus = careText(careFirst(state, ['current_focus', 'focus'], ''));
+  const focusItems = careItems(state, ['current_focus_items', 'recent_activities', 'recent_timeline']);
+  const rows = [];
+  [['状态', state.enabled === undefined ? '' : (state.enabled ? 'enabled' : 'disabled')], ['自动', state.auto_enabled === undefined ? '' : (state.auto_enabled ? 'enabled' : 'disabled')], ['更新时间', careFirst(state, ['updated_at', 'last_run_date'], '')]].forEach(function(pair) { if (pair[1] !== '') rows.push('<b>' + pair[0] + '</b><span>' + esc(careText(pair[1])) + '</span>'); });
+  let html = rows.length ? '<div class="care-kv">' + rows.join('') + '</div>' : '';
+  ['user', 'persona', 'relationship'].forEach(function(scope) {
+    const block = portrait[scope];
+    if (!block || typeof block !== 'object') return;
+    const stable = careText(block.stable || block.mid_term || '');
+    if (stable) html += '<div class="care-item"><div class="care-item-title"><span>' + esc(scope) + '</span><span class="care-item-time">stable</span></div><div class="care-item-body">' + esc(stable) + '</div></div>';
+  });
+  if (focus) html += '<div class="care-item"><div style="color:var(--text-dim);font-size:11px;">Current focus</div><div class="care-item-body" style="margin-top:2px;">' + esc(focus) + '</div></div>';
+  if (focusItems.length) html += '<div class="care-chips">' + focusItems.slice(0, 8).map(function(item) { return '<span class="care-chip">' + esc(careText(careFirst(item, ['text', 'content', 'title', 'name'], item))) + '</span>'; }).join('') + '</div>';
+  careSetCount('care-portrait-count', focusItems.length ? focusItems.length + ' recent' : '');
+  el.innerHTML = html || '<div class="care-empty">画像暂无可读摘要 / No readable portrait state</div>';
+}
+
+function renderCareFacts(data) {
+  const items = careItems(data, ['facts', 'items', 'results']);
+  careSetCount('care-facts-count', items.length + ' 条');
+  careRenderItems('care-facts-content', items, '暂无画像事实 / No profile facts', function(item) {
+    const title = careText(careFirst(item, ['name', 'kind', 'title'], '画像事实'));
+    const body = careText(careFirst(item, ['content', 'text', 'fact', 'object'], ''));
+    const subject = careText(careFirst(item, ['subject', 'predicate'], ''));
+    const time = careText(careFirst(item, ['updated_at', 'created_at'], ''));
+    const label = subject && body && subject !== body ? subject + ' · ' : '';
+    return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span>' + (time ? '<span class="care-item-time">' + esc(time) + '</span>' : '') + '</div>' + (label || body ? '<div class="care-item-body">' + esc(label + body) + '</div>' : '') + '</div>';
+  });
+}
+
+function renderCareWordMap(data) {
+  const el = document.getElementById('care-wordmap-content');
+  if (!el) return;
+  const obj = data && typeof data === 'object' ? data : {};
+  const nodes = careItems(obj, ['nodes']);
+  const edges = careItems(obj, ['edges']);
+  const stats = obj.stats && typeof obj.stats === 'object' ? obj.stats : {};
+  careSetCount('care-wordmap-count', (nodes.length ? nodes.length + ' nodes' : '') + (edges.length ? (nodes.length ? ' · ' : '') + edges.length + ' edges' : ''));
+  const statChips = Object.keys(stats).slice(0, 8).map(function(key) { return '<span class="care-chip"><strong>' + esc(key) + '</strong> ' + esc(careText(stats[key])) + '</span>'; });
+  const nodeChips = nodes.slice(0, 24).map(function(node) { const label = careText(careFirst(node, ['label', 'term', 'word', 'name'], node)); const weight = careFirst(node, ['weight', 'count', 'frequency'], ''); return '<span class="care-chip">' + esc(label) + (weight !== '' ? ' · ' + esc(careText(weight)) : '') + '</span>'; });
+  const edgeRows = edges.slice(0, 10).map(function(edge) { return '<div style="font-size:11px;color:var(--text-dim);">' + esc(careText(careFirst(edge, ['source', 'from', 'source_term', 'term_a'], '?'))) + ' ↔ ' + esc(careText(careFirst(edge, ['target', 'to', 'target_term', 'term_b'], '?'))) + (careFirst(edge, ['weight', 'count'], '') !== '' ? ' · ' + esc(careText(careFirst(edge, ['weight', 'count'], ''))) : '') + '</div>'; });
+  let html = statChips.length ? '<div class="care-chips">' + statChips.join('') + '</div>' : '';
+  if (obj.enabled === false) html += '<div class="care-empty" style="padding:8px;">词图未启用 / Word Map disabled</div>';
+  if (nodeChips.length) html += '<div><div style="margin:10px 0 6px;color:var(--text-dim);font-size:11px;">高频节点 / Nodes</div><div class="care-chips">' + nodeChips.join('') + '</div></div>';
+  if (edgeRows.length) html += '<div><div style="margin:10px 0 6px;color:var(--text-dim);font-size:11px;">关联 / Edges</div>' + edgeRows.join('') + '</div>';
+  if (!html) html = '<div class="care-empty">暂无词图概览 / No Word Map overview</div>';
+  el.innerHTML = html;
+}
+
+function openCareDetail(title, body) {
+  const generation = ++careDetailGeneration;
+  const panel = document.getElementById('detail-panel');
+  const content = document.getElementById('detail-content');
+  if (!panel || !content) return;
+  content.innerHTML = '<h2>' + esc(title || 'Care detail') + '</h2><div class="detail-content">' + esc(body || '暂无详情 / No detail') + '</div>';
+  panel.classList.add('open');
+  if (window.lucide) lucide.createIcons();
+  return generation;
+}
+
+async function openCareDream(id) {
+  const generation = ++careDetailGeneration;
+  const panel = document.getElementById('detail-panel');
+  const content = document.getElementById('detail-content');
+  if (!panel || !content) return;
+  panel.classList.add('open');
+  content.innerHTML = '<div class="loading">加载中… / Loading…</div>';
+  try {
+    const data = await careFetchJson('/api/dreams/' + encodeURIComponent(id));
+    if (generation !== careDetailGeneration || !panel.classList.contains('open')) return;
+    const title = careText(careFirst(data, ['title', 'name'], 'Dream detail'));
+    const body = careText(careFirst(data, ['content', 'body', 'text', 'summary'], data));
+    content.innerHTML = '<h2>' + esc(title) + '</h2><div class="detail-content">' + esc(body) + '</div>';
+  } catch (e) {
+    if (generation !== careDetailGeneration) return;
+    content.innerHTML = '<div class="loading">暂不可用 / Unavailable：' + esc(e.message) + '</div>';
+  }
+}
+
+async function loadCareDashboard() {
+  const generation = ++careLoadGeneration;
+  const requestedReminderStatus = careReminderStatus;
+  const reminderGeneration = ++careReminderLoadGeneration;
+  const requestedPersonaSession = carePersonaSelectedSession;
+  const personaGeneration = ++carePersonaLoadGeneration;
+  const status = document.getElementById('care-status');
+  if (status) { status.textContent = '读取中… / Loading…'; status.classList.add('care-refreshing'); }
+  const jobs = [
+    ['reminders', '/api/reminders?status=' + encodeURIComponent(requestedReminderStatus) + '&limit=50', renderCareReminders, 'care-reminders-content'],
+    ['moments', '/api/moments?limit=200', renderCareMoments, 'care-moments-content'],
+    ['pending', '/api/daily-chat-memory/pending?status=pending&limit=12', renderCarePending, 'care-pending-content'],
+    ['dreams', '/api/dreams?limit=8', renderCareDreams, 'care-dreams-content'],
+    ['persona', '/api/persona?events_limit=8&sessions_limit=4' + (requestedPersonaSession ? '&session_id=' + encodeURIComponent(requestedPersonaSession) : ''), renderCarePersona, 'care-persona-content'],
+    ['portrait', '/api/portrait-state', renderCarePortrait, 'care-portrait-content'],
+    ['facts', '/api/profile-facts?limit=12', renderCareFacts, 'care-facts-content'],
+    ['wordmap', '/api/word-map?nodes=8&edges=10', renderCareWordMap, 'care-wordmap-content']
+  ];
+  const widgetCurrent = function(name) {
+    if (generation !== careLoadGeneration) return false;
+    if (name === 'reminders' && (reminderGeneration !== careReminderLoadGeneration || requestedReminderStatus !== careReminderStatus)) return false;
+    if (name === 'persona' && (personaGeneration !== carePersonaLoadGeneration || requestedPersonaSession !== carePersonaSelectedSession)) return false;
+    return true;
+  };
+  jobs.forEach(function(job) { careLoading(job[3]); });
+  const results = await Promise.allSettled(jobs.map(async function(job) {
+    try {
+      const data = await careFetchJson(job[1]);
+      if (widgetCurrent(job[0])) job[2](data);
+      return {name: job[0], ok: true};
+    } catch (e) {
+      if (widgetCurrent(job[0])) renderCareUnavailable(job[3], e.message);
+      return {name: job[0], ok: false};
+    }
+  }));
+  if (generation !== careLoadGeneration) return results;
+  const failed = results.filter(function(result) { return result.status === 'fulfilled' && !result.value.ok; }).length;
+  if (status) {
+    status.classList.remove('care-refreshing');
+    status.textContent = failed ? (failed + '/' + jobs.length + ' 不可用 / unavailable') : '已更新 / Updated';
+  }
+  if (window.lucide) lucide.createIcons();
+  return results;
+}
+
+// Care controls are rendered with data attributes and handled from one stable root.
+// Explicitly expose this small compatibility surface for scoped/evaluated scripts.
+Object.assign(window, {
+  setCareReminderFilter,
+  editCareReminder,
+  toggleCareReminderForm,
+  closeCareReminderForm,
+  saveCareReminder,
+  careReminderPatch,
+  shiftCareMomentsMonth,
+  selectCareMomentDate,
+  openCareDetail,
+  openCareDream,
+  loadCareDashboard,
+  loadCarePersonaForSession,
+});
+
+function openCareItemDetail(kind, index) {
+  const collection = kind === 'moment' ? careMomentsData : carePendingItems;
+  const item = collection[Number(index)];
+  if (!item) return;
+  const title = careText(careFirst(item, ['title', 'name', 'kind'], kind === 'moment' ? '日印象' : '自动记忆候选'));
+  const body = careText(careFirst(item, ['text', 'content', 'summary', 'description'], '')) || careText(item);
+  openCareDetail(title, body);
+}
+
+function wireCareControls() {
+  const root = document.getElementById('care-view');
+  if (!root || root.getAttribute('data-care-wired') === '1') return;
+  root.setAttribute('data-care-wired', '1');
+  const bind = function(selector, handler) {
+    const el = root.querySelector(selector);
+    if (el) el.addEventListener('click', handler);
+  };
+  bind('#care-refresh-button', function() { loadCareDashboard(); });
+  bind('#care-reminder-add-button', function() {
+    toggleCareReminderForm(null);
+  });
+  bind('#care-reminder-cancel-button', function() { closeCareReminderForm(); });
+  root.addEventListener('click', function(event) {
+    const target = event.target;
+    const filter = target && target.closest ? target.closest('[data-care-reminder-status]') : null;
+    if (filter && root.contains(filter)) {
+      event.preventDefault();
+      setCareReminderFilter(filter.getAttribute('data-care-reminder-status'));
+      return;
+    }
+    const button = target && target.closest ? target.closest('[data-care-action]') : null;
+    if (!button || !root.contains(button)) return;
+    event.preventDefault();
+    const action = button.getAttribute('data-care-action');
+    const id = button.getAttribute('data-care-id') || '';
+    if (action === 'select-date') selectCareMomentDate(button.getAttribute('data-care-date') || '');
+    else if (action === 'detail') openCareItemDetail(button.getAttribute('data-care-kind') || '', button.getAttribute('data-care-index'));
+    else if (action === 'edit-reminder') editCareReminder(id);
+    else if (action === 'patch-reminder') careReminderPatch(id, {status: button.getAttribute('data-care-status') || 'active'});
+    else if (action === 'snooze-reminder') careReminderPatch(id, {snooze_minutes: 30});
+    else if (action === 'open-dream') openCareDream(id);
+  });
+  bind('#care-moments-prev-button', function() { shiftCareMomentsMonth(-1); });
+  bind('#care-moments-next-button', function() { shiftCareMomentsMonth(1); });
+  const form = root.querySelector('#care-reminder-form');
+  if (form) form.addEventListener('submit', function(event) { saveCareReminder(event); });
+  const persona = root.querySelector('#care-persona-session');
+  if (persona) persona.addEventListener('change', function() { loadCarePersonaForSession(persona.value); });
+}
 async function loadAbout() {
   const el = document.getElementById('about-content');
   el.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:13px;">加载中… / Loading…</div>';
@@ -8766,12 +10049,19 @@ async function loadAbout() {
   }
 }
 
-// Re-render Lucide icons whenever DOM is ready (covers static markup)
-window.addEventListener('DOMContentLoaded', function() {
+// Re-render Lucide icons whenever DOM is ready (covers static markup).
+// The readyState branch also covers scoped/late script evaluation after DOMContentLoaded.
+function finishDashboardDomReady() {
   if (window.lucide) lucide.createIcons();
+  wireCareControls();
   updateChick(0);              // 小黄鸡蛋初始（loadBuckets 后会按真实总数更新）
   startPlaceholderRotation();  // 搜索框随机 placeholder
-});
+}
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', finishDashboardDomReady, { once: true });
+} else {
+  finishDashboardDomReady();
+}
 
 // 更新/换机后发现一条记忆都没有 → 顶部红色横幅，引导从 GitHub 恢复。
 // 只在确实零记忆且已配置 GitHub 时出现；导入按钮平时仍在设置里随时可用。
@@ -9701,6 +10991,10 @@ function renderMigrateParsed(d) {
     infoHtml += `<span style="color:var(--negative)">${_SV.warn} ${esc(d.integrity_warning)}</span> `;
   }
   infoHtml += `解析到 <strong>${Number(d.total_buckets || 0)}</strong> 个 bucket。`;
+  const ignoredMembers = Array.isArray(d.ignored_members) ? d.ignored_members : [];
+  if (ignoredMembers.length > 0) {
+    infoHtml += ` <span style="color:var(--text-dim)">已跳过 ${ignoredMembers.length} 个运行时文档，它们不是记忆内容。</span>`;
+  }
   if (hasEmb) {
     if (embMatch) {
       infoHtml += ` <span style="color:var(--positive)">${_SV.ok} Embedding 模型一致（${esc(importModel)}），向量数据将一并导入。</span>`;

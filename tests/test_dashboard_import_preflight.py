@@ -9,5 +9,7 @@ def test_dashboard_import_flow_contains_preflight_confirmation():
         assert 'id="import-start-confirm-btn"' in html
         assert "async function runImportPreflight(file)" in html
         assert "function renderImportPreflight" in html
+        assert "d.ignored_members" in html
+        assert "运行时文档" in html
         assert "/api/import/preflight" in html
 
