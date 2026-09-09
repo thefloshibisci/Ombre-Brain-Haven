@@ -14,6 +14,15 @@ from env_loader import load_env_file, ombre_env_path
 
 SHUTDOWN_GRACE_SECONDS = 10
 
+MODEL_ENV_ALIASES = {
+    "OMBRE_COMPRESS_API_KEY": ("OMBRE_API_KEY",),
+    "OMBRE_COMPRESS_BASE_URL": ("OMBRE_DEHYDRATION_BASE_URL", "OMBRE_BASE_URL"),
+    "OMBRE_COMPRESS_MODEL": ("OMBRE_DEHYDRATION_MODEL", "OMBRE_MODEL"),
+    "OMBRE_EMBED_API_KEY": ("OMBRE_EMBEDDING_API_KEY",),
+    "OMBRE_EMBED_BASE_URL": ("OMBRE_EMBEDDING_BASE_URL",),
+    "OMBRE_EMBED_MODEL": ("OMBRE_EMBEDDING_MODEL",),
+}
+
 
 def ensure_runtime_config() -> None:
     state_dir = Path(os.environ.get("OMBRE_STATE_DIR", "/state"))
@@ -51,6 +60,17 @@ def build_child_env(role: str) -> dict[str, str]:
     internal-only, so they must not inherit that public binding.
     """
     env = os.environ.copy()
+    if role in {"brain", "gateway"}:
+        # The v3 Brain and Haven Gateway use different names for the same model
+        # settings. Canonical dashboard values win; legacy-only installs still boot.
+        for canonical, legacy_names in MODEL_ENV_ALIASES.items():
+            value = env.get(canonical)
+            if value is None:
+                value = next((env[name] for name in legacy_names if env.get(name)), None)
+            if value is not None:
+                env[canonical] = value
+                for name in legacy_names:
+                    env[name] = value
     if role == "proxy":
         env["OMBRE_PROXY_PORT"] = os.environ.get("OMBRE_PROXY_PORT", "9000")
         env.pop("PORT", None)

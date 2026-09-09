@@ -209,3 +209,28 @@ def test_entrypoint_prefers_explicit_proxy_port(monkeypatch):
 
     assert proxy_env["OMBRE_PROXY_PORT"] == "9000"
     assert "PORT" not in proxy_env
+
+
+@pytest.mark.parametrize("role", ["brain", "gateway"])
+def test_entrypoint_maps_legacy_model_settings_to_v3(role, monkeypatch):
+    for canonical, aliases in entrypoint_zeabur.MODEL_ENV_ALIASES.items():
+        monkeypatch.delenv(canonical, raising=False)
+        for alias in aliases:
+            monkeypatch.delenv(alias, raising=False)
+        monkeypatch.setenv(aliases[0], "legacy-test-value")
+    env = entrypoint_zeabur.build_child_env(role)
+    for canonical, aliases in entrypoint_zeabur.MODEL_ENV_ALIASES.items():
+        assert env[canonical] == "legacy-test-value"
+        assert all(env[alias] == "legacy-test-value" for alias in aliases)
+        assert canonical not in entrypoint_zeabur.os.environ
+
+
+@pytest.mark.parametrize("value", ["new-test-key", ""])
+@pytest.mark.parametrize("role", ["brain", "gateway"])
+def test_entrypoint_prefers_canonical_values_in_both_children(role, value, monkeypatch):
+    monkeypatch.setenv("OMBRE_EMBEDDING_API_KEY", "legacy-test-key")
+    monkeypatch.setenv("OMBRE_EMBED_API_KEY", value)
+    env = entrypoint_zeabur.build_child_env(role)
+    assert env["OMBRE_EMBED_API_KEY"] == value
+    assert env["OMBRE_EMBEDDING_API_KEY"] == value
+    assert entrypoint_zeabur.os.environ["OMBRE_EMBEDDING_API_KEY"] == "legacy-test-key"
