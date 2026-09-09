@@ -163,6 +163,7 @@ async def test_proxy_streams_event_responses(monkeypatch):
 
 
 def test_entrypoint_creates_credential_free_runtime_config(monkeypatch, tmp_path):
+    monkeypatch.delenv("OMBRE_RUNTIME_CONFIG_PATH", raising=False)
     state_dir = tmp_path / "state"
     data_dir = tmp_path / "data"
     monkeypatch.setenv("PORT", "9123")
@@ -234,3 +235,31 @@ def test_entrypoint_prefers_canonical_values_in_both_children(role, value, monke
     assert env["OMBRE_EMBED_API_KEY"] == value
     assert env["OMBRE_EMBEDDING_API_KEY"] == value
     assert entrypoint_zeabur.os.environ["OMBRE_EMBEDDING_API_KEY"] == "legacy-test-key"
+
+
+def test_brain_reads_and_writes_the_persistent_runtime_config(monkeypatch, tmp_path):
+    runtime = tmp_path / "persistent" / "custom.yaml"
+    monkeypatch.setenv("OMBRE_RUNTIME_CONFIG_PATH", str(runtime))
+    monkeypatch.setenv("OMBRE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("OMBRE_CONFIG_PATH", raising=False)
+    entrypoint_zeabur.ensure_runtime_config()
+    assert runtime.is_file()
+    env = entrypoint_zeabur.build_child_env("brain")
+    assert env["OMBRE_CONFIG_PATH"] == str(runtime)
+    original = b"embedding:\n  model: preserved-model\ngateway:\n  upstreams: []\n"
+    runtime.write_bytes(original)
+    entrypoint_zeabur.ensure_runtime_config()
+    assert runtime.read_bytes() == original
+
+
+def test_brain_preserves_explicit_config_override(monkeypatch):
+    monkeypatch.setenv("OMBRE_CONFIG_PATH", "/custom/brain.yaml")
+    monkeypatch.setenv("OMBRE_RUNTIME_CONFIG_PATH", "/state/config.runtime.yaml")
+    assert entrypoint_zeabur.build_child_env("brain")["OMBRE_CONFIG_PATH"] == "/custom/brain.yaml"
+
+
+def test_brain_config_falls_back_to_state_volume(monkeypatch, tmp_path):
+    monkeypatch.setenv("OMBRE_STATE_DIR", str(tmp_path))
+    monkeypatch.delenv("OMBRE_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("OMBRE_RUNTIME_CONFIG_PATH", raising=False)
+    assert entrypoint_zeabur.build_child_env("brain")["OMBRE_CONFIG_PATH"] == str(tmp_path / "config.runtime.yaml")

@@ -26,10 +26,10 @@ MODEL_ENV_ALIASES = {
 
 def ensure_runtime_config() -> None:
     state_dir = Path(os.environ.get("OMBRE_STATE_DIR", "/state"))
-    state_dir.mkdir(parents=True, exist_ok=True)
-    runtime_path = state_dir / "config.runtime.yaml"
+    runtime_path = Path(os.environ.get("OMBRE_RUNTIME_CONFIG_PATH") or state_dir / "config.runtime.yaml")
     if runtime_path.exists():
         return
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
 
     # No credentials here: the adapter resolves SERVICE_TOKEN from env.
     config = {
@@ -75,6 +75,10 @@ def build_child_env(role: str) -> dict[str, str]:
         env["OMBRE_PROXY_PORT"] = os.environ.get("OMBRE_PROXY_PORT", "9000")
         env.pop("PORT", None)
     elif role == "brain":
+        if not env.get("OMBRE_CONFIG_PATH", "").strip():
+            env["OMBRE_CONFIG_PATH"] = env.get("OMBRE_RUNTIME_CONFIG_PATH") or str(
+                Path(env.get("OMBRE_STATE_DIR", "/state")) / "config.runtime.yaml"
+            )
         env["OMBRE_PORT"] = os.environ.get("OMBRE_PORT", "8000")
         env["PORT"] = env["OMBRE_PORT"]
     elif role == "gateway":
