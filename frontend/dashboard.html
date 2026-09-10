@@ -9637,6 +9637,9 @@ function renderCareMomentsCalendar() {
   if (monthText) monthText.textContent = year + '-' + String(month + 1).padStart(2, '0');
   const grouped = {};
   careMomentsData.forEach(function(item) { const key = careDateKey(careFirst(item, ['date','created_at','updated_at','start_at'], '')); if (key) (grouped[key] ||= []).push(item); });
+  const monthPrefix = year + '-' + String(month + 1).padStart(2, '0') + '-';
+  const selected = careSelectedMomentDate.startsWith(monthPrefix) ? careSelectedMomentDate : Object.keys(grouped).sort().reverse().find(function(key) { return key.startsWith(monthPrefix); }) || '';
+  careSelectedMomentDate = selected;
   const first = new Date(year, month, 1).getDay();
   const days = new Date(year, month + 1, 0).getDate();
   let html = '<div class="care-calendar">' + ['日','一','二','三','四','五','六'].map(function(day) { return '<span class="weekday">' + day + '</span>'; }).join('');
@@ -9647,12 +9650,10 @@ function renderCareMomentsCalendar() {
     html += '<button type="button" class="' + (has ? 'has-items ' : '') + (key === careSelectedMomentDate ? 'selected' : '') + '" data-care-action="select-date" data-care-date="' + escAttr(key) + '">' + day + (has ? ' ·' : '') + '</button>';
   }
   html += '</div>';
-  const selected = careSelectedMomentDate && grouped[careSelectedMomentDate] ? careSelectedMomentDate : Object.keys(grouped).sort().reverse().find(function(key) { return key.startsWith(year + '-' + String(month + 1).padStart(2, '0')); }) || '';
-  careSelectedMomentDate = selected;
   const items = selected ? (grouped[selected] || []) : [];
   html += selected ? '<div class="care-card-meta" style="margin-bottom:6px;">' + esc(selected) + '</div>' : '';
   if (items.length) html += items.map(function(item) { const title = careText(careFirst(item, ['title','name','kind'], '日印象')); const body = careText(careFirst(item, ['text','content','summary','description'], '')); const index = careMomentsData.indexOf(item); return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span></div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + '<div class="care-item-actions"><button type="button" data-care-action="detail" data-care-kind="moment" data-care-index="' + escAttr(index) + '">展开详情</button></div></div>'; }).join('');
-  else html += '<div class="care-empty">该月暂无日印象 / No impression on this date</div>';
+  else html += '<div class="care-empty">' + (selected ? '当天暂无日印象 / No impression on this date' : '该月暂无日印象 / No impressions this month') + '</div>';
   el.innerHTML = html;
 }
 
@@ -9817,7 +9818,7 @@ function renderCarePortrait(data) {
   const state = obj.state && typeof obj.state === 'object' ? obj.state : obj;
   const portrait = obj.portrait && typeof obj.portrait === 'object' ? obj.portrait : (state.portrait && typeof state.portrait === 'object' ? state.portrait : {});
   const focus = careText(careFirst(state, ['current_focus', 'focus'], ''));
-  const focusItems = careItems(state, ['current_focus_items', 'recent_activities', 'recent_timeline']);
+  const focusItems = ['current_focus_items', 'recent_activities', 'recent_timeline'].map(function(key) { return careItems(state, [key]); }).find(function(items) { return items.length; }) || [];
   const rows = [];
   [['状态', state.enabled === undefined ? '' : (state.enabled ? 'enabled' : 'disabled')], ['自动', state.auto_enabled === undefined ? '' : (state.auto_enabled ? 'enabled' : 'disabled')], ['更新时间', careFirst(state, ['updated_at', 'last_run_date'], '')]].forEach(function(pair) { if (pair[1] !== '') rows.push('<b>' + pair[0] + '</b><span>' + esc(careText(pair[1])) + '</span>'); });
   let html = rows.length ? '<div class="care-kv">' + rows.join('') + '</div>' : '';

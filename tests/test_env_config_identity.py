@@ -44,6 +44,17 @@ def test_shared_dashboard_writer_uses_the_same_env_path(monkeypatch, tmp_path):
     assert shared._project_env_path() == os.path.join(str(tmp_path), ".env")
 
 
+def test_config_loader_honors_platform_state_directory(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("state_dir: old-state\n", encoding="utf-8")
+    monkeypatch.setenv("OMBRE_BUCKETS_DIR", str(tmp_path / "buckets"))
+    monkeypatch.setenv("OMBRE_MEDIA_DIR", str(tmp_path / "media"))
+    monkeypatch.setenv("OMBRE_STATE_DIR", str(tmp_path / "persistent-state"))
+    assert load_config(str(config_path))["state_dir"] == str(tmp_path / "persistent-state")
+    monkeypatch.delenv("OMBRE_STATE_DIR")
+    assert load_config(str(config_path))["state_dir"] == "old-state"
+
+
 def test_shared_dashboard_writer_creates_parent_for_explicit_env_path(monkeypatch, tmp_path):
     env_path = tmp_path / "nested" / "state" / ".env"
     monkeypatch.setenv("OMBRE_ENV_PATH", str(env_path))

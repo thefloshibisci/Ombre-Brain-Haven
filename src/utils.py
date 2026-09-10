@@ -575,6 +575,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
     }
     config["transport"] = _transport_aliases.get(_raw_transport, _raw_transport)
     _apply_env_override(config, "OMBRE_BUCKETS_DIR", "buckets_dir")
+    _apply_env_override(config, "OMBRE_STATE_DIR", "state_dir")
     env_buckets_dir = os.environ.get("OMBRE_BUCKETS_DIR", "")
 
     # MCP 鉴权开关（布尔，单独处理）—— OMBRE_MCP_REQUIRE_AUTH

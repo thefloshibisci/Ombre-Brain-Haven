@@ -209,6 +209,11 @@ renderCareReminders({reminders: [{
   status: 'active',
 }]});
 process.stdout.write(elements.get('care-reminders-content').innerHTML);
+renderCarePortrait({state: {
+  current_focus_items: [], recent_activities: [],
+  recent_timeline: [{text: '<b>Recent timeline entry</b>'}],
+}});
+process.stdout.write(elements.get('care-portrait-content').innerHTML);
 '''
     completed = subprocess.run(
         [shutil.which("node"), "-e", script],
@@ -223,6 +228,8 @@ process.stdout.write(elements.get('care-reminders-content').innerHTML);
     assert "<svg" not in rendered
     assert 'data-care-id="x&quot; data-x=&quot;y"' in rendered
     assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
+    assert "&lt;b&gt;Recent timeline entry&lt;/b&gt;" in rendered
+    assert "<b>Recent timeline entry</b>" not in rendered
 
 
 def test_care_form_edit_reset_and_write_safety_contract():
@@ -246,6 +253,46 @@ def test_care_form_edit_reset_and_write_safety_contract():
     assert "const requestedStatus = careReminderStatus;" in _section(
         care, "async function loadCareReminders", "function renderCareMomentsCalendar"
     )
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
+def test_care_calendar_keeps_empty_day_selection_and_changes_month():
+    html = _read(DASHBOARD)
+    calendar = _section(html, "function renderCareMomentsCalendar()", "function renderCareReminders")
+    script = r'''
+const assert = require('node:assert/strict');
+const elements = new Map();
+const document = {getElementById(id) {
+  if (!elements.has(id)) elements.set(id, {innerHTML: '', textContent: ''});
+  return elements.get(id);
+}};
+const esc = String, escAttr = String, careText = String;
+const careFirst = (obj, keys, fallback) => keys.map(key => obj[key]).find(value => value !== undefined) ?? fallback;
+const careDateKey = value => String(value).slice(0, 10);
+let careMomentsMonth = new Date(2026, 8, 1), careSelectedMomentDate = '', careMomentsMonthPinned = false;
+const careMomentsData = [
+  {date: '2026-09-08', content: 'September entry'},
+  {date: '2026-08-29', content: 'August entry'},
+];
+''' + calendar + r'''
+renderCareMomentsCalendar();
+assert.equal(careSelectedMomentDate, '2026-09-08');
+assert.match(elements.get('care-moments-content').innerHTML, /class="has-items selected"[^>]+data-care-date="2026-09-08"/);
+selectCareMomentDate('2026-09-10');
+assert.equal(careSelectedMomentDate, '2026-09-10');
+assert.match(elements.get('care-moments-content').innerHTML, /class="selected"[^>]+data-care-date="2026-09-10"/);
+assert.doesNotMatch(elements.get('care-moments-content').innerHTML, /September entry/);
+selectCareMomentDate('2026-09-08');
+shiftCareMomentsMonth(-1);
+assert.equal(careSelectedMomentDate, '2026-08-29');
+assert.match(elements.get('care-moments-content').innerHTML, /August entry/);
+assert.doesNotMatch(elements.get('care-moments-content').innerHTML, /September entry/);
+shiftCareMomentsMonth(-1);
+assert.equal(careSelectedMomentDate, '');
+assert.doesNotMatch(elements.get('care-moments-content').innerHTML, /August entry/);
+'''
+    completed = subprocess.run([shutil.which("node"), "-e", script], capture_output=True, text=True, encoding="utf-8")
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_persona_dream_and_word_map_use_existing_compatibility_fields():

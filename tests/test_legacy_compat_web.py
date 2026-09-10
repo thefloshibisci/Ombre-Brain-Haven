@@ -312,7 +312,7 @@ async def test_word_map_preserves_per_bucket_aggregation_and_limits(isolated_run
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", [
     "/api/reminders", "/api/persona", "/api/word-map",
-    "/api/portrait-state", "/api/daily-chat-memory/pending",
+    "/api/portrait-state",
 ])
 async def test_missing_storage_is_explicit_and_never_created(isolated_runtime, path):
     response = await call(path)
@@ -320,6 +320,26 @@ async def test_missing_storage_is_explicit_and_never_created(isolated_runtime, p
     assert json.loads(response.body)["available"] is False
     assert list((isolated_runtime / "state").iterdir()) == []
     assert str(isolated_runtime).encode() not in response.body
+
+
+@pytest.mark.asyncio
+async def test_pending_not_yet_created_is_empty_without_writing(isolated_runtime):
+    response = await call("/api/daily-chat-memory/pending")
+    assert response.status_code == 200
+    data = json.loads(response.body)
+    assert data["available"] is True
+    assert data["storage_state"] == "not_created"
+    assert data["count"] == 0 and data["items"] == []
+    assert list((isolated_runtime / "state").iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_pending_missing_state_directory_remains_unavailable(isolated_runtime, monkeypatch):
+    monkeypatch.setitem(sh.config, "state_dir", str(isolated_runtime / "missing-volume"))
+    response = await call("/api/daily-chat-memory/pending")
+    assert response.status_code == 503
+    assert json.loads(response.body)["available"] is False
+    assert not (isolated_runtime / "missing-volume").exists()
 
 
 @pytest.mark.asyncio

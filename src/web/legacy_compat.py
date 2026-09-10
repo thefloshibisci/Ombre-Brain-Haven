@@ -1009,7 +1009,12 @@ def register(mcp) -> None:
             return err
         wanted = str(request.query_params.get("status") or "pending").strip()
         try:
-            raw = _read_json(_path_for("pending"))
+            path = _path_for("pending")
+            # Reflection creates this file lazily when it first stores candidates.
+            # A missing parent still indicates unavailable storage, not an empty queue.
+            if not path.exists() and path.parent.is_dir():
+                return JSONResponse({**_base("empty", available=True), "storage_state": "not_created", "count": 0, "items": []})
+            raw = _read_json(path)
             if isinstance(raw, dict):
                 items = raw.get("items", raw.get("candidates", []))
             else:
