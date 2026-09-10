@@ -9764,6 +9764,11 @@ function renderCarePersona(data) {
     }).join('');
     if (current) sessionSelect.value = current;
   }
+  if (!Object.keys(state).length && !sessions.length && !events.length) {
+    careSetCount('care-persona-count', '');
+    el.innerHTML = '<div class="care-empty">Persona 尚无状态记录 / No Persona state recorded</div>';
+    return;
+  }
   careSetCount('care-persona-count', (events.length ? events.length + ' events' : '') + (sessions.length ? (events.length ? ' · ' : '') + sessions.length + ' sessions' : (profileId ? 'state' : '')));
 
   const labels = {

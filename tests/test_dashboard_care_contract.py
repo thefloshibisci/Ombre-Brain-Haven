@@ -214,6 +214,8 @@ renderCarePortrait({state: {
   recent_timeline: [{text: '<b>Recent timeline entry</b>'}],
 }});
 process.stdout.write(elements.get('care-portrait-content').innerHTML);
+renderCarePersona({profile_id: 'configured-profile', state: {}, sessions: [], events: []});
+process.stdout.write(elements.get('care-persona-content').innerHTML);
 '''
     completed = subprocess.run(
         [shutil.which("node"), "-e", script],
@@ -230,6 +232,8 @@ process.stdout.write(elements.get('care-portrait-content').innerHTML);
     assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
     assert "&lt;b&gt;Recent timeline entry&lt;/b&gt;" in rendered
     assert "<b>Recent timeline entry</b>" not in rendered
+    assert "No Persona state recorded" in rendered
+    assert "warm_neutral" not in rendered
 
 
 def test_care_form_edit_reset_and_write_safety_contract():
