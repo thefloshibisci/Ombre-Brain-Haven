@@ -83,6 +83,7 @@ def build_child_env(role: str) -> dict[str, str]:
         env["PORT"] = env["OMBRE_PORT"]
     elif role == "gateway":
         env["OMBRE_GATEWAY_PORT"] = os.environ.get("OMBRE_GATEWAY_PORT", "8010")
+        env.setdefault("OMBRE_CARE_SCHEDULER", "1")
         env.pop("PORT", None)
     elif role == "xinchao":
         env["OMBRE_XINCHAO_PORT"] = os.environ.get("OMBRE_XINCHAO_PORT", "18110")

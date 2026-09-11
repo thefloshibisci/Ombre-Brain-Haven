@@ -65,6 +65,7 @@ from env_loader import load_env_file
 load_env_file()
 
 from bucket_manager import BucketManager
+from care_scheduler import CareScheduler
 from dehydrator import Dehydrator
 from dream_engine import DreamEngine
 from errors import safe_error_detail
@@ -900,8 +901,18 @@ class GatewayService:
         if not isinstance(xinchao_cfg, dict):
             xinchao_cfg = {}
         self.xinchao_adapter = self._build_xinchao_adapter(xinchao_cfg, db_path=self.state_store.db_path)
+        # Zeabur's src/ Brain no longer owns the legacy Care loops. Opt in only
+        # for that topology so a standalone Gateway beside the old server cannot
+        # accidentally run a second scheduler against the same vault.
+        self.care_scheduler = (
+            CareScheduler(self)
+            if os.environ.get("OMBRE_CARE_SCHEDULER", "").lower() in {"1", "true", "yes"}
+            else None
+        )
 
     async def close(self) -> None:
+        if self.care_scheduler is not None:
+            await self.care_scheduler.stop()
         await self.xinchao_adapter.stop_delivery_worker()
         await self.xinchao_adapter.aclose()
         if self.http_client and not getattr(self.http_client, "is_closed", False):
@@ -1006,6 +1017,10 @@ class GatewayService:
                 "direct_render_mode": self.direct_render_mode,
                 "retrieval_mode": self.retrieval_mode,
                 "xinchao_adapter": self.xinchao_adapter.status(),
+                "care_scheduler": (
+                    self.care_scheduler.status() if self.care_scheduler is not None
+                    else {"running": False, "jobs": {}}
+                ),
                 "bucket_list_cache_ttl_seconds": self.bucket_list_cache_ttl_seconds,
                 "recall_fusion_mode": self.recall_fusion_mode,
                 "reranker": {
@@ -21488,9 +21503,13 @@ def create_gateway_app(
     @asynccontextmanager
     async def lifespan(app: Starlette):
         app.state.gateway_service = service
-        await service.warm_recall_runtime()
-        yield
-        await service.close()
+        try:
+            await service.warm_recall_runtime()
+            if service.care_scheduler is not None:
+                await service.care_scheduler.start()
+            yield
+        finally:
+            await service.close()
 
     async def health(request: Request) -> JSONResponse:
         return await request.app.state.gateway_service.handle_health(request)
