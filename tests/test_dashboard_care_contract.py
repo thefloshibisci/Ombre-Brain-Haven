@@ -282,6 +282,7 @@ const careMomentsData = [
 const careMemoryData = [
   {id: 'ordinary-1', created: '2026-09-07', type: 'dynamic', name: 'Ordinary memory', content_preview: 'Memory on this date'},
 ];
+const careCalendarMemoryItems = () => careMemoryData;
 ''' + calendar + r'''
 renderCareMomentsCalendar();
 assert.equal(careSelectedMomentDate, '2026-09-08');

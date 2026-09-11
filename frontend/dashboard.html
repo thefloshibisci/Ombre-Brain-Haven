@@ -9494,6 +9494,13 @@ function careDateKey(value) {
   return match ? match[1] : '';
 }
 
+function careCalendarMemoryItems() {
+  return careMemoryData.filter(function(item) {
+    const type = String(careFirst(item, ['type'], 'dynamic')).toLowerCase();
+    return item && !item.letter_locked && type !== 'archived' && type !== 'plan' && type !== 'letter';
+  });
+}
+
 function setCareReminderFilter(status) {
   const validStatuses = ['active', 'done', 'archived', 'all'];
   careReminderStatus = validStatuses.includes(status) ? status : 'active';
@@ -9640,9 +9647,7 @@ function renderCareMomentsCalendar() {
   const grouped = {};
   careMomentsData.forEach(function(item) { const key = careDateKey(careFirst(item, ['date','created_at','updated_at','start_at'], '')); if (key) (grouped[key] ||= []).push(item); });
   const memoryGrouped = {};
-  careMemoryData.forEach(function(item) {
-    const type = String(careFirst(item, ['type'], 'dynamic')).toLowerCase();
-    if (!item || item.letter_locked || type === 'archived' || type === 'plan' || type === 'letter') return;
+  careCalendarMemoryItems().forEach(function(item) {
     const key = careDateKey(careFirst(item, ['created','created_at','updated_at','last_active'], ''));
     if (key) (memoryGrouped[key] ||= []).push(item);
   });
@@ -9699,7 +9704,7 @@ function renderCareMoments(data) {
     const match = latest.match(/^(\d{4})-(\d{2})-/);
     if (match) careMomentsMonth = new Date(Number(match[1]), Number(match[2]) - 1, 1);
   }
-  careSetCount('care-moments-count', careMomentsData.length + ' 条日印象' + (careMemoryData.length ? ' · ' + careMemoryData.length + ' 条记忆' : ''));
+  careSetCount('care-moments-count', careMomentsData.length + ' 条日印象' + (careCalendarMemoryItems().length ? ' · ' + careCalendarMemoryItems().length + ' 条记忆' : ''));
   renderCareMomentsCalendar();
 }
 
@@ -9710,7 +9715,7 @@ function renderCareMemoryDays(data) {
     const match = latest.match(/^(\d{4})-(\d{2})-/);
     if (match) careMomentsMonth = new Date(Number(match[1]), Number(match[2]) - 1, 1);
   }
-  careSetCount('care-moments-count', careMomentsData.length + ' 条日印象' + (careMemoryData.length ? ' · ' + careMemoryData.length + ' 条记忆' : ''));
+  careSetCount('care-moments-count', careMomentsData.length + ' 条日印象' + (careCalendarMemoryItems().length ? ' · ' + careCalendarMemoryItems().length + ' 条记忆' : ''));
   renderCareMomentsCalendar();
 }
 
