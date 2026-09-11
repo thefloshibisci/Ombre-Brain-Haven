@@ -247,9 +247,13 @@ async def test_chat_request_recalls_memory_and_records_round_in_isolated_store(c
         content="The observatory access code is VIOLET-731.",
         tags=["observatory", "access"], importance=8,
     )
+    await service.bucket_mgr.create(content="An isolated letter.", bucket_type="letter")
     app = gateway.create_gateway_app(config=care_config, service=service)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as browser:
+            health = await browser.get("/health")
+            assert health.status_code == 200, health.text
+            assert health.json()["buckets"]["letter_count"] == 1
             response = await browser.post("/v1/chat/completions", json={
                 "model": "test-model", "messages": [{"role": "user", "content": "What was the observatory access code?"}],
             }, headers={"X-Ombre-Session-Id": "isolated-care-check", "Authorization": "Bearer test-gateway-token"})
