@@ -282,8 +282,9 @@ const careMomentsData = [
 const careMemoryData = [
   {id: 'ordinary-1', created: '2026-09-07', type: 'dynamic', name: 'Ordinary memory', content_preview: 'Memory on this date'},
 ];
-const careCalendarMemoryItems = () => careMemoryData;
-''' + calendar + r'''
+const careCalendarLoadState = {moments:'ok', 'memory-days':'ok'}, careCalendarLoadErrors = {};
+const careSetCount = (id, value) => { document.getElementById(id).textContent = value; };
+''' + _section(html, "function careCalendarMemoryItems()", "function setCareReminderFilter") + calendar + r'''
 renderCareMomentsCalendar();
 assert.equal(careSelectedMomentDate, '2026-09-08');
 assert.match(elements.get('care-moments-content').innerHTML, /class="has-items selected"[^>]+data-care-date="2026-09-08"/);
@@ -303,6 +304,71 @@ assert.doesNotMatch(elements.get('care-moments-content').innerHTML, /September e
 shiftCareMomentsMonth(-1);
 assert.equal(careSelectedMomentDate, '');
 assert.doesNotMatch(elements.get('care-moments-content').innerHTML, /August entry/);
+'''
+    completed = subprocess.run([shutil.which("node"), "-"], input=script, capture_output=True, text=True, encoding="utf-8")
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
+def test_care_calendar_isolates_failed_sources_and_excludes_impressions_from_memories():
+    html = _read(DASHBOARD)
+    script = r'''
+const assert = require('node:assert/strict');
+const elements = new Map();
+const document = {getElementById(id) {
+  if (!elements.has(id)) elements.set(id, {innerHTML:'', textContent:'', classList:{add(){}, remove(){}}});
+  return elements.get(id);
+}};
+const window = {};
+const esc = String, escAttr = String;
+const renderCareReminders = () => {}, renderCarePending = () => {}, renderCareDreams = () => {};
+const renderCarePersona = () => {}, renderCarePortrait = () => {}, renderCareFacts = () => {}, renderCareWordMap = () => {};
+''' + _section(html, "// ====== Care /", "function setCareReminderFilter") + _section(
+        html, "function renderCareMomentsCalendar()", "function renderCareReminders"
+    ) + _section(html, "function renderCareMoments(data)", "function renderCarePending") + _section(
+        html, "async function loadCareDashboard()", "// Care controls are rendered"
+    ) + r'''
+const moment = {id:'reflection_daily_2026-09-07', date:'2026-09-07', content:'Daily impression'};
+const memories = [
+  {id:'ordinary', type:'dynamic', created:'2026-09-08', content_preview:'Ordinary memory'},
+  {id:moment.id, type:'feel', created:'2026-09-08', content_preview:'Must not duplicate'},
+  {id:'tagged', type:'feel', tags:['daily_impression'], created:'2026-09-08'},
+  {id:'old', type:'archived', created:'2026-09-10'},
+  {id:'future-plan', type:'plan', created:'2026-10-01'},
+  {id:'letter', type:'letter', created:'2026-10-01'},
+];
+const content = () => elements.get('care-moments-content').innerHTML;
+(async () => {
+  for (const failed of ['moments', 'memory-days']) {
+    for (const failureFirst of [true, false]) {
+      let settleMoment, settleMemory;
+      careFetchJson = (url) => {
+        if (url.startsWith('/api/moments')) return new Promise((resolve,reject) => { settleMoment = () => failed === 'moments' ? reject(new Error('offline')) : resolve({moments:[moment]}); });
+        if (url.startsWith('/api/buckets')) return new Promise((resolve,reject) => { settleMemory = () => failed === 'memory-days' ? reject(new Error('offline')) : resolve(memories); });
+        return Promise.resolve({});
+      };
+      const pending = loadCareDashboard();
+      const first = (failed === 'moments') === failureFirst ? settleMoment : settleMemory;
+      const second = first === settleMoment ? settleMemory : settleMoment;
+      first(); await Promise.resolve(); second(); await pending;
+      assert.match(content(), /Unavailable/i, 'Failed source must remain visible in either response order');
+      assert.doesNotMatch(content(), /No memory or daily impression on this date/);
+      assert.match(content(), failed === 'moments' ? /Ordinary memory/ : /Daily impression/);
+      assert.doesNotMatch(content(), /Must not duplicate/);
+    }
+  }
+  careFetchJson = async (url) => url.startsWith('/api/moments') ? {moments:[moment]} : url.startsWith('/api/buckets') ? memories : {};
+  careMomentsMonthPinned = false;
+  await loadCareDashboard();
+  assert.equal(careSelectedMomentDate, '2026-09-08');
+  assert.equal(careCalendarMemoryItems().length, 1);
+  assert.doesNotMatch(content(), /Unavailable|Must not duplicate/);
+  selectCareMomentDate('2026-09-07');
+  assert.match(content(), /Daily impression/);
+  assert.doesNotMatch(content(), /Ordinary memory/);
+  await loadCareDashboard();
+  assert.equal(careSelectedMomentDate, '2026-09-07', 'Refresh must preserve a manually selected date');
+})().catch(error => { console.error(error); process.exitCode = 1; });
 '''
     completed = subprocess.run([shutil.which("node"), "-"], input=script, capture_output=True, text=True, encoding="utf-8")
     assert completed.returncode == 0, completed.stderr

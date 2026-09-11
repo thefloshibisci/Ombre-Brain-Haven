@@ -2628,7 +2628,7 @@
         <div id="care-reminders-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
       </div>
       <div class="config-section care-card" id="care-moments-section">
-        <div class="care-card-head"><h3>日印象 <span class="sec-en">Daily impressions</span></h3><div style="display:flex;align-items:center;gap:7px;"><span id="care-moments-count" class="care-card-meta" aria-live="polite"></span><button id="care-moments-prev-button" type="button" class="btn-secondary" aria-label="上一个月 / Previous month" title="上一个月 / Previous month" style="padding:4px 7px;font-size:11px;">‹</button><span id="care-moments-month" class="care-card-meta" aria-live="polite"></span><button id="care-moments-next-button" type="button" class="btn-secondary" aria-label="下一个月 / Next month" title="下一个月 / Next month" style="padding:4px 7px;font-size:11px;">›</button></div></div>
+        <div class="care-card-head"><h3>记忆日历 <span class="sec-en">Memory calendar</span></h3><div style="display:flex;align-items:center;flex-wrap:wrap;max-width:100%;gap:7px;"><span id="care-moments-count" class="care-card-meta" aria-live="polite"></span><button id="care-moments-prev-button" type="button" class="btn-secondary" aria-label="上一个月 / Previous month" title="上一个月 / Previous month" style="padding:4px 7px;font-size:11px;">‹</button><span id="care-moments-month" class="care-card-meta" aria-live="polite"></span><button id="care-moments-next-button" type="button" class="btn-secondary" aria-label="下一个月 / Next month" title="下一个月 / Next month" style="padding:4px 7px;font-size:11px;">›</button></div></div>
         <div id="care-moments-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
       </div>
       <div class="config-section care-card" id="care-pending-section">
@@ -9482,6 +9482,8 @@ let careReminderEditingId = '';
 let careReminderItems = {};
 let careMomentsData = [];
 let careMemoryData = [];
+let careCalendarLoadState = {moments: 'idle', 'memory-days': 'idle'};
+let careCalendarLoadErrors = {};
 let carePendingItems = [];
 let careMomentsMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let careMomentsMonthPinned = false;
@@ -9495,9 +9497,16 @@ function careDateKey(value) {
 }
 
 function careCalendarMemoryItems() {
+  const momentIds = new Set(careMomentsData.map(function(item) { return String(item.bucket_id || item.id || ''); }));
+  const values = function(value) { return (Array.isArray(value) ? value : String(value || '').split(',')).map(function(item) { return String(item).trim().toLowerCase(); }); };
+  const momentKinds = new Set(['daily_impression', 'daily_moment', 'daily-impression', 'daily-moment', 'reflection_daily', '日印象']);
   return careMemoryData.filter(function(item) {
-    const type = String(careFirst(item, ['type'], 'dynamic')).toLowerCase();
-    return item && !item.letter_locked && type !== 'archived' && type !== 'plan' && type !== 'letter';
+    if (!item || item.letter_locked) return false;
+    const types = values(item.type || 'dynamic');
+    if (types.some(function(type) { return ['archive', 'archived', 'plan', 'letter'].includes(type); })) return false;
+    const id = String(item.id || '');
+    if (momentIds.has(id) || id.toLowerCase().startsWith('reflection_daily_')) return false;
+    return !types.concat(values(item.tags), values(item.domain)).some(function(kind) { return momentKinds.has(kind); });
   });
 }
 
@@ -9640,18 +9649,29 @@ async function loadCareReminders() {
 function renderCareMomentsCalendar() {
   const el = document.getElementById('care-moments-content');
   if (!el) return;
-  const year = careMomentsMonth.getFullYear();
-  const month = careMomentsMonth.getMonth();
-  const monthText = document.getElementById('care-moments-month');
-  if (monthText) monthText.textContent = year + '-' + String(month + 1).padStart(2, '0');
   const grouped = {};
   careMomentsData.forEach(function(item) { const key = careDateKey(careFirst(item, ['date','created_at','updated_at','start_at'], '')); if (key) (grouped[key] ||= []).push(item); });
   const memoryGrouped = {};
-  careCalendarMemoryItems().forEach(function(item) {
+  const calendarMemories = careCalendarMemoryItems();
+  calendarMemories.forEach(function(item) {
     const key = careDateKey(careFirst(item, ['created','created_at','updated_at','last_active'], ''));
     if (key) (memoryGrouped[key] ||= []).push(item);
   });
   const dates = Object.keys(grouped).concat(Object.keys(memoryGrouped));
+  if (!careMomentsMonthPinned && dates.length) {
+    const latest = dates.slice().sort().reverse()[0];
+    careMomentsMonth = new Date(Number(latest.slice(0, 4)), Number(latest.slice(5, 7)) - 1, 1);
+    careSelectedMomentDate = latest;
+  }
+  const year = careMomentsMonth.getFullYear();
+  const month = careMomentsMonth.getMonth();
+  const monthText = document.getElementById('care-moments-month');
+  if (monthText) monthText.textContent = year + '-' + String(month + 1).padStart(2, '0');
+  const momentsReady = careCalendarLoadState.moments === 'ok';
+  const memoriesReady = careCalendarLoadState['memory-days'] === 'ok';
+  const momentCount = momentsReady ? careMomentsData.length + ' 条日印象' : '日印象' + (careCalendarLoadState.moments === 'error' ? '不可用' : '读取中');
+  const memoryCount = memoriesReady ? calendarMemories.length + ' 条记忆' : '记忆' + (careCalendarLoadState['memory-days'] === 'error' ? '不可用' : '读取中');
+  careSetCount('care-moments-count', momentCount + ' · ' + memoryCount);
   const monthPrefix = year + '-' + String(month + 1).padStart(2, '0') + '-';
   const selected = careSelectedMomentDate.startsWith(monthPrefix) ? careSelectedMomentDate : dates.sort().reverse().find(function(key) { return key.startsWith(monthPrefix); }) || '';
   careSelectedMomentDate = selected;
@@ -9665,13 +9685,18 @@ function renderCareMomentsCalendar() {
     html += '<button type="button" class="' + (has ? 'has-items ' : '') + (key === careSelectedMomentDate ? 'selected' : '') + '" data-care-action="select-date" data-care-date="' + escAttr(key) + '">' + day + (has ? ' ·' : '') + '</button>';
   }
   html += '</div>';
+  [['moments', '日印象 / Impressions'], ['memory-days', '记忆 / Memories']].forEach(function(source) {
+    const state = careCalendarLoadState[source[0]];
+    if (state === 'error') html += '<div class="care-unavailable">' + source[1] + ' 暂不可用 / Unavailable<br>' + esc(careCalendarLoadErrors[source[0]] || '') + '</div>';
+    else if (state !== 'ok') html += '<div class="care-card-meta">' + source[1] + ' 读取中 / Loading</div>';
+  });
   const items = selected ? (grouped[selected] || []) : [];
   const memories = selected ? (memoryGrouped[selected] || []) : [];
   html += selected ? '<div class="care-card-meta" style="margin-bottom:6px;">' + esc(selected) + '</div>' : '';
   if (items.length) html += items.map(function(item) { const title = careText(careFirst(item, ['title','name','kind'], '日印象')); const body = careText(careFirst(item, ['text','content','summary','description'], '')); const index = careMomentsData.indexOf(item); return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span></div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + '<div class="care-item-actions"><button type="button" data-care-action="detail" data-care-kind="moment" data-care-index="' + escAttr(index) + '">展开详情</button></div></div>'; }).join('');
-  if (!items.length && selected && memories.length) html += '<div class="care-card-meta" style="margin:10px 0 6px;">当天暂无日印象 / No daily impression</div>';
+  if (momentsReady && !items.length && selected && memories.length) html += '<div class="care-card-meta" style="margin:10px 0 6px;">当天暂无日印象 / No daily impression</div>';
   if (memories.length) html += '<div class="care-card-meta" style="margin:10px 0 6px;">当天记忆 / Memories that day (' + memories.length + ')</div>' + memories.map(function(item) { const title = careText(careFirst(item, ['name','title','id'], '记忆')); const body = careText(careFirst(item, ['content_preview','content','text'], '')); const index = careMemoryData.indexOf(item); return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span></div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + '<div class="care-item-actions"><button type="button" data-care-action="detail" data-care-kind="memory" data-care-index="' + escAttr(index) + '">展开详情</button></div></div>'; }).join('');
-  if (!items.length && !memories.length) html += '<div class="care-empty">' + (selected ? '当天暂无记忆或日印象 / No memory or daily impression on this date' : '该月暂无记忆或日印象 / No memories or daily impressions this month') + '</div>';
+  if (momentsReady && memoriesReady && !items.length && !memories.length) html += '<div class="care-empty">' + (selected ? '当天暂无记忆或日印象 / No memory or daily impression on this date' : '该月暂无记忆或日印象 / No memories or daily impressions this month') + '</div>';
   el.innerHTML = html;
 }
 
@@ -9699,23 +9724,13 @@ function renderCareReminders(data) {
 
 function renderCareMoments(data) {
   careMomentsData = careItems(data, ['moments', 'items', 'impressions', 'results']);
-  if (!careMomentsMonthPinned) {
-    const latest = careMomentsData.map(function(item) { return careDateKey(careFirst(item, ['date', 'created_at', 'updated_at', 'start_at'], '')); }).filter(Boolean).sort().reverse()[0] || '';
-    const match = latest.match(/^(\d{4})-(\d{2})-/);
-    if (match) careMomentsMonth = new Date(Number(match[1]), Number(match[2]) - 1, 1);
-  }
-  careSetCount('care-moments-count', careMomentsData.length + ' 条日印象' + (careCalendarMemoryItems().length ? ' · ' + careCalendarMemoryItems().length + ' 条记忆' : ''));
+  careCalendarLoadState.moments = 'ok';
   renderCareMomentsCalendar();
 }
 
 function renderCareMemoryDays(data) {
   careMemoryData = careItems(data, ['buckets', 'items', 'memories', 'results']);
-  if (!careMomentsMonthPinned && !careMomentsData.length) {
-    const latest = careMemoryData.map(function(item) { return careDateKey(careFirst(item, ['created', 'created_at', 'updated_at', 'last_active'], '')); }).filter(Boolean).sort().reverse()[0] || '';
-    const match = latest.match(/^(\d{4})-(\d{2})-/);
-    if (match) careMomentsMonth = new Date(Number(match[1]), Number(match[2]) - 1, 1);
-  }
-  careSetCount('care-moments-count', careMomentsData.length + ' 条日印象' + (careCalendarMemoryItems().length ? ' · ' + careCalendarMemoryItems().length + ' 条记忆' : ''));
+  careCalendarLoadState['memory-days'] = 'ok';
   renderCareMomentsCalendar();
 }
 
@@ -10014,6 +10029,10 @@ async function openCareDream(id) {
 
 async function loadCareDashboard() {
   const generation = ++careLoadGeneration;
+  careMomentsData = [];
+  careMemoryData = [];
+  careCalendarLoadState = {moments: 'loading', 'memory-days': 'loading'};
+  careCalendarLoadErrors = {};
   const requestedReminderStatus = careReminderStatus;
   const reminderGeneration = ++careReminderLoadGeneration;
   const requestedPersonaSession = carePersonaSelectedSession;
@@ -10037,7 +10056,8 @@ async function loadCareDashboard() {
     if (name === 'persona' && (personaGeneration !== carePersonaLoadGeneration || requestedPersonaSession !== carePersonaSelectedSession)) return false;
     return true;
   };
-  jobs.forEach(function(job) { careLoading(job[3]); });
+  jobs.forEach(function(job) { if (!(job[0] in careCalendarLoadState)) careLoading(job[3]); });
+  renderCareMomentsCalendar();
   const results = await Promise.allSettled(jobs.map(async function(job) {
     try {
       const data = await careFetchJson(job[1]);
@@ -10045,7 +10065,13 @@ async function loadCareDashboard() {
       if (widgetCurrent(job[0]) && job[0] === 'portrait' && data.initialization_available) pollCarePortraitInitialization();
       return {name: job[0], ok: true};
     } catch (e) {
-      if (widgetCurrent(job[0])) renderCareUnavailable(job[3], e.message);
+      if (widgetCurrent(job[0])) {
+        if (job[0] in careCalendarLoadState) {
+          careCalendarLoadState[job[0]] = 'error';
+          careCalendarLoadErrors[job[0]] = e.message;
+          renderCareMomentsCalendar();
+        } else renderCareUnavailable(job[3], e.message);
+      }
       return {name: job[0], ok: false};
     }
   }));
@@ -10099,7 +10125,7 @@ async function openCareBucketDetail(id, fallbackTitle, fallbackBody) {
   try {
     const data = await careFetchJson('/api/bucket/' + encodeURIComponent(id));
     if (generation !== careDetailGeneration || !panel.classList.contains('open')) return;
-    const title = careText(careFirst(data, ['name', 'title'], fallbackTitle));
+    const title = careText(careFirst(data.metadata, ['name', 'title'], fallbackTitle));
     const body = careText(careFirst(data, ['display_content', 'content', 'text'], fallbackBody));
     content.innerHTML = '<h2>' + esc(title) + '</h2><div class="detail-content">' + esc(body || '暂无详情 / No detail') + '</div>';
   } catch (e) {
