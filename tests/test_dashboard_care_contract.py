@@ -279,14 +279,21 @@ const careMomentsData = [
   {date: '2026-09-08', content: 'September entry'},
   {date: '2026-08-29', content: 'August entry'},
 ];
+const careMemoryData = [
+  {id: 'ordinary-1', created: '2026-09-07', type: 'dynamic', name: 'Ordinary memory', content_preview: 'Memory on this date'},
+];
 ''' + calendar + r'''
 renderCareMomentsCalendar();
 assert.equal(careSelectedMomentDate, '2026-09-08');
 assert.match(elements.get('care-moments-content').innerHTML, /class="has-items selected"[^>]+data-care-date="2026-09-08"/);
+assert.match(elements.get('care-moments-content').innerHTML, /data-care-date="2026-09-07"/);
 selectCareMomentDate('2026-09-10');
 assert.equal(careSelectedMomentDate, '2026-09-10');
 assert.match(elements.get('care-moments-content').innerHTML, /class="selected"[^>]+data-care-date="2026-09-10"/);
 assert.doesNotMatch(elements.get('care-moments-content').innerHTML, /September entry/);
+selectCareMomentDate('2026-09-07');
+assert.match(elements.get('care-moments-content').innerHTML, /Memory on this date/);
+assert.match(elements.get('care-moments-content').innerHTML, /No daily impression/);
 selectCareMomentDate('2026-09-08');
 shiftCareMomentsMonth(-1);
 assert.equal(careSelectedMomentDate, '2026-08-29');

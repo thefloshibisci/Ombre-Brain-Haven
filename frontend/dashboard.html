@@ -9481,6 +9481,7 @@ let careReminderStatus = 'active';
 let careReminderEditingId = '';
 let careReminderItems = {};
 let careMomentsData = [];
+let careMemoryData = [];
 let carePendingItems = [];
 let careMomentsMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let careMomentsMonthPinned = false;
@@ -9638,8 +9639,16 @@ function renderCareMomentsCalendar() {
   if (monthText) monthText.textContent = year + '-' + String(month + 1).padStart(2, '0');
   const grouped = {};
   careMomentsData.forEach(function(item) { const key = careDateKey(careFirst(item, ['date','created_at','updated_at','start_at'], '')); if (key) (grouped[key] ||= []).push(item); });
+  const memoryGrouped = {};
+  careMemoryData.forEach(function(item) {
+    const type = String(careFirst(item, ['type'], 'dynamic')).toLowerCase();
+    if (!item || item.letter_locked || type === 'archived' || type === 'plan' || type === 'letter') return;
+    const key = careDateKey(careFirst(item, ['created','created_at','updated_at','last_active'], ''));
+    if (key) (memoryGrouped[key] ||= []).push(item);
+  });
+  const dates = Object.keys(grouped).concat(Object.keys(memoryGrouped));
   const monthPrefix = year + '-' + String(month + 1).padStart(2, '0') + '-';
-  const selected = careSelectedMomentDate.startsWith(monthPrefix) ? careSelectedMomentDate : Object.keys(grouped).sort().reverse().find(function(key) { return key.startsWith(monthPrefix); }) || '';
+  const selected = careSelectedMomentDate.startsWith(monthPrefix) ? careSelectedMomentDate : dates.sort().reverse().find(function(key) { return key.startsWith(monthPrefix); }) || '';
   careSelectedMomentDate = selected;
   const first = new Date(year, month, 1).getDay();
   const days = new Date(year, month + 1, 0).getDate();
@@ -9647,14 +9656,17 @@ function renderCareMomentsCalendar() {
   for (let i = 0; i < first; i++) html += '<button class="empty" tabindex="-1"></button>';
   for (let day = 1; day <= days; day++) {
     const key = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
-    const has = !!grouped[key];
+    const has = !!grouped[key] || !!memoryGrouped[key];
     html += '<button type="button" class="' + (has ? 'has-items ' : '') + (key === careSelectedMomentDate ? 'selected' : '') + '" data-care-action="select-date" data-care-date="' + escAttr(key) + '">' + day + (has ? ' ·' : '') + '</button>';
   }
   html += '</div>';
   const items = selected ? (grouped[selected] || []) : [];
+  const memories = selected ? (memoryGrouped[selected] || []) : [];
   html += selected ? '<div class="care-card-meta" style="margin-bottom:6px;">' + esc(selected) + '</div>' : '';
   if (items.length) html += items.map(function(item) { const title = careText(careFirst(item, ['title','name','kind'], '日印象')); const body = careText(careFirst(item, ['text','content','summary','description'], '')); const index = careMomentsData.indexOf(item); return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span></div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + '<div class="care-item-actions"><button type="button" data-care-action="detail" data-care-kind="moment" data-care-index="' + escAttr(index) + '">展开详情</button></div></div>'; }).join('');
-  else html += '<div class="care-empty">' + (selected ? '当天暂无日印象 / No impression on this date' : '该月暂无日印象 / No impressions this month') + '</div>';
+  if (!items.length && selected && memories.length) html += '<div class="care-card-meta" style="margin:10px 0 6px;">当天暂无日印象 / No daily impression</div>';
+  if (memories.length) html += '<div class="care-card-meta" style="margin:10px 0 6px;">当天记忆 / Memories that day (' + memories.length + ')</div>' + memories.map(function(item) { const title = careText(careFirst(item, ['name','title','id'], '记忆')); const body = careText(careFirst(item, ['content_preview','content','text'], '')); const index = careMemoryData.indexOf(item); return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span></div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + '<div class="care-item-actions"><button type="button" data-care-action="detail" data-care-kind="memory" data-care-index="' + escAttr(index) + '">展开详情</button></div></div>'; }).join('');
+  if (!items.length && !memories.length) html += '<div class="care-empty">' + (selected ? '当天暂无记忆或日印象 / No memory or daily impression on this date' : '该月暂无记忆或日印象 / No memories or daily impressions this month') + '</div>';
   el.innerHTML = html;
 }
 
@@ -9687,7 +9699,18 @@ function renderCareMoments(data) {
     const match = latest.match(/^(\d{4})-(\d{2})-/);
     if (match) careMomentsMonth = new Date(Number(match[1]), Number(match[2]) - 1, 1);
   }
-  careSetCount('care-moments-count', careMomentsData.length + ' 条');
+  careSetCount('care-moments-count', careMomentsData.length + ' 条日印象' + (careMemoryData.length ? ' · ' + careMemoryData.length + ' 条记忆' : ''));
+  renderCareMomentsCalendar();
+}
+
+function renderCareMemoryDays(data) {
+  careMemoryData = careItems(data, ['buckets', 'items', 'memories', 'results']);
+  if (!careMomentsMonthPinned && !careMomentsData.length) {
+    const latest = careMemoryData.map(function(item) { return careDateKey(careFirst(item, ['created', 'created_at', 'updated_at', 'last_active'], '')); }).filter(Boolean).sort().reverse()[0] || '';
+    const match = latest.match(/^(\d{4})-(\d{2})-/);
+    if (match) careMomentsMonth = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  }
+  careSetCount('care-moments-count', careMomentsData.length + ' 条日印象' + (careMemoryData.length ? ' · ' + careMemoryData.length + ' 条记忆' : ''));
   renderCareMomentsCalendar();
 }
 
@@ -9995,6 +10018,7 @@ async function loadCareDashboard() {
   const jobs = [
     ['reminders', '/api/reminders?status=' + encodeURIComponent(requestedReminderStatus) + '&limit=50', renderCareReminders, 'care-reminders-content'],
     ['moments', '/api/moments?limit=200', renderCareMoments, 'care-moments-content'],
+    ['memory-days', '/api/buckets?sort=created_asc', renderCareMemoryDays, 'care-moments-content'],
     ['pending', '/api/daily-chat-memory/pending?status=pending&limit=12', renderCarePending, 'care-pending-content'],
     ['dreams', '/api/dreams?limit=8', renderCareDreams, 'care-dreams-content'],
     ['persona', '/api/persona?events_limit=8&sessions_limit=4' + (requestedPersonaSession ? '&session_id=' + encodeURIComponent(requestedPersonaSession) : ''), renderCarePersona, 'care-persona-content'],
@@ -10048,12 +10072,35 @@ Object.assign(window, {
 });
 
 function openCareItemDetail(kind, index) {
-  const collection = kind === 'moment' ? careMomentsData : carePendingItems;
+  const collection = kind === 'moment' ? careMomentsData : (kind === 'memory' ? careMemoryData : carePendingItems);
   const item = collection[Number(index)];
   if (!item) return;
-  const title = careText(careFirst(item, ['title', 'name', 'kind'], kind === 'moment' ? '日印象' : '自动记忆候选'));
-  const body = careText(careFirst(item, ['text', 'content', 'summary', 'description'], '')) || careText(item);
+  const title = careText(careFirst(item, ['title', 'name', 'kind'], kind === 'moment' ? '日印象' : (kind === 'memory' ? '记忆' : '自动记忆候选')));
+  const body = careText(careFirst(item, ['text', 'content', 'content_preview', 'summary', 'description'], '')) || careText(item);
+  if (kind === 'memory' && item.id) {
+    openCareBucketDetail(String(item.id), title, body);
+    return;
+  }
   openCareDetail(title, body);
+}
+
+async function openCareBucketDetail(id, fallbackTitle, fallbackBody) {
+  const generation = ++careDetailGeneration;
+  const panel = document.getElementById('detail-panel');
+  const content = document.getElementById('detail-content');
+  if (!panel || !content) return;
+  panel.classList.add('open');
+  content.innerHTML = '<div class="loading">加载中… / Loading…</div>';
+  try {
+    const data = await careFetchJson('/api/bucket/' + encodeURIComponent(id));
+    if (generation !== careDetailGeneration || !panel.classList.contains('open')) return;
+    const title = careText(careFirst(data, ['name', 'title'], fallbackTitle));
+    const body = careText(careFirst(data, ['display_content', 'content', 'text'], fallbackBody));
+    content.innerHTML = '<h2>' + esc(title) + '</h2><div class="detail-content">' + esc(body || '暂无详情 / No detail') + '</div>';
+  } catch (e) {
+    if (generation !== careDetailGeneration) return;
+    content.innerHTML = '<div class="loading">暂不可用 / Unavailable：' + esc(e.message) + '</div>';
+  }
 }
 
 function wireCareControls() {
