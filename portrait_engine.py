@@ -323,7 +323,6 @@ class DailyPortraitMaintainer:
             not materials.get("daily_bucket_count")
             and not materials["persona_events"]
             and not (persona_stable_empty and has_persona_seed)
-            and not force
         ):
             return {
                 "status": "empty",

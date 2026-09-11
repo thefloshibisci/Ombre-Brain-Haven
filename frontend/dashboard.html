@@ -2644,7 +2644,8 @@
         <div id="care-persona-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
       </div>
       <div class="config-section care-card" id="care-portrait-section">
-        <div class="care-card-head"><h3>画像 <span class="sec-en">Portrait</span></h3><span id="care-portrait-count" class="care-card-meta"></span></div>
+        <div class="care-card-head"><h3>画像 <span class="sec-en">Portrait</span></h3><span id="care-portrait-count" class="care-card-meta"></span><button id="care-portrait-initialize" class="btn btn-sm" type="button" hidden title="初始化画像 / Initialize portrait"><i data-lucide="sparkles" style="width:14px;height:14px;"></i> 初始化画像</button></div>
+        <div id="care-portrait-initialization-status" role="status" aria-live="polite" style="font-size:12px;line-height:1.6;overflow-wrap:anywhere;"></div>
         <div id="care-portrait-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
       </div>
       <div class="config-section care-card" id="care-facts-section">
@@ -9820,6 +9821,9 @@ function renderCarePortrait(data) {
   const el = document.getElementById('care-portrait-content');
   if (!el) return;
   const obj = data && typeof data === 'object' ? data : {};
+  carePortraitInitialized = obj.initialized === true;
+  carePortraitInitializationAvailable = obj.initialization_available === true;
+  renderCarePortraitInitialization();
   const state = obj.state && typeof obj.state === 'object' ? obj.state : obj;
   const portrait = obj.portrait && typeof obj.portrait === 'object' ? obj.portrait : (state.portrait && typeof state.portrait === 'object' ? state.portrait : {});
   const focus = careText(careFirst(state, ['current_focus', 'focus'], ''));
@@ -9837,6 +9841,85 @@ function renderCarePortrait(data) {
   if (focusItems.length) html += '<div class="care-chips">' + focusItems.slice(0, 8).map(function(item) { return '<span class="care-chip">' + esc(careText(careFirst(item, ['text', 'content', 'title', 'name'], item))) + '</span>'; }).join('') + '</div>';
   careSetCount('care-portrait-count', focusItems.length ? focusItems.length + ' recent' : '');
   el.innerHTML = html || '<div class="care-empty">画像暂无可读摘要 / No readable portrait state</div>';
+}
+
+let carePortraitInitialized = false;
+let carePortraitInitializationAvailable = false;
+let carePortraitInitialization = {status: 'idle'};
+let carePortraitPollTimer = null;
+let carePortraitRequestGeneration = 0;
+let carePortraitSubmitting = false;
+
+function renderCarePortraitInitialization() {
+  const button = document.getElementById('care-portrait-initialize');
+  const label = document.getElementById('care-portrait-initialization-status');
+  const running = carePortraitInitialization.status === 'running';
+  if (button) {
+    button.hidden = carePortraitInitialized || !carePortraitInitializationAvailable;
+    button.disabled = running;
+    button.setAttribute('aria-busy', String(running));
+  }
+  const reasons = {
+    generator_unavailable: '画像模型尚未配置 / Model unavailable',
+    generator_error: '画像模型调用失败，可重试 / Model request failed',
+    portrait_disabled: '画像未启用 / Portrait disabled',
+    initialization_failed: '初始化失败，请检查服务日志 / Initialization failed',
+  };
+  const statuses = {
+    running: '正在生成画像… / Generating portrait…',
+    initialized: '画像已初始化 / Portrait initialized',
+    exists: '画像已初始化 / Portrait initialized',
+    interrupted: '生成已中断，可重试 / Generation interrupted',
+    idle: carePortraitInitialized ? '' : '画像尚未初始化 / Portrait not initialized',
+  };
+  if (label) label.textContent = carePortraitInitialization.error || reasons[carePortraitInitialization.reason] || statuses[carePortraitInitialization.status] || '本次未生成画像 / No portrait generated';
+}
+
+async function pollCarePortraitInitialization() {
+  if (carePortraitSubmitting) return;
+  const generation = ++carePortraitRequestGeneration;
+  clearTimeout(carePortraitPollTimer);
+  try {
+    const result = await careFetchJson('/api/portrait/initialize');
+    if (generation !== carePortraitRequestGeneration) return;
+    carePortraitInitialization = result;
+    if (carePortraitInitialization.status === 'running') {
+      carePortraitPollTimer = setTimeout(pollCarePortraitInitialization, 2000);
+    } else if (['initialized', 'exists'].includes(carePortraitInitialization.status)) {
+      const portrait = await careFetchJson('/api/portrait-state');
+      if (generation !== carePortraitRequestGeneration) return;
+      renderCarePortrait(portrait);
+    }
+  } catch (error) {
+    if (generation !== carePortraitRequestGeneration) return;
+    carePortraitInitialization = {status: 'error', error: error.message};
+  }
+  renderCarePortraitInitialization();
+}
+
+async function initializeCarePortrait() {
+  if (carePortraitInitialized || !carePortraitInitializationAvailable || carePortraitInitialization.status === 'running') return;
+  ++carePortraitRequestGeneration;
+  clearTimeout(carePortraitPollTimer);
+  carePortraitSubmitting = true;
+  carePortraitInitialization = {status: 'running'};
+  renderCarePortraitInitialization();
+  try {
+    const response = await authFetch('/api/portrait/initialize', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+    });
+    if (!response) throw new Error('需要重新登录 / Authentication required');
+    const data = await readJsonSafe(response);
+    if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+    carePortraitInitialization = data;
+    carePortraitSubmitting = false;
+    await pollCarePortraitInitialization();
+  } catch (error) {
+    carePortraitInitialization = {status: 'error', error: error.message};
+    renderCarePortraitInitialization();
+  } finally {
+    carePortraitSubmitting = false;
+  }
 }
 
 function renderCareFacts(data) {
@@ -9930,6 +10013,7 @@ async function loadCareDashboard() {
     try {
       const data = await careFetchJson(job[1]);
       if (widgetCurrent(job[0])) job[2](data);
+      if (widgetCurrent(job[0]) && job[0] === 'portrait' && data.initialization_available) pollCarePortraitInitialization();
       return {name: job[0], ok: true};
     } catch (e) {
       if (widgetCurrent(job[0])) renderCareUnavailable(job[3], e.message);
@@ -9981,6 +10065,7 @@ function wireCareControls() {
     if (el) el.addEventListener('click', handler);
   };
   bind('#care-refresh-button', function() { loadCareDashboard(); });
+  bind('#care-portrait-initialize', initializeCarePortrait);
   bind('#care-reminder-add-button', function() {
     toggleCareReminderForm(null);
   });

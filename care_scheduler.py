@@ -1,7 +1,9 @@
 """Lifecycle-owned Care jobs for the Gateway sidecar beside the src/ Brain."""
 
 import asyncio
+import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -54,6 +56,9 @@ class CareScheduler:
         self.service = service
         self.initial_delay = initial_delay
         self._task = None
+        self._write_lock = asyncio.Lock()
+        self._portrait_task = None
+        self._portrait_result = {"status": "idle"}
         self._jobs = {name: {"status": "waiting"} for name in ENGINE_TYPES}
 
     def status(self):
@@ -69,12 +74,48 @@ class CareScheduler:
 
     async def stop(self):
         task, self._task = self._task, None
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        portrait_task, self._portrait_task = self._portrait_task, None
+        tasks = [item for item in (task, portrait_task) if item is not None]
+        for item in tasks:
+            item.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    def portrait_initialization_status(self):
+        return deepcopy(self._portrait_result)
+
+    def initialize_portrait(self):
+        if self._portrait_task is None or self._portrait_task.done():
+            self._portrait_result = {"status": "running"}
+            self._portrait_task = asyncio.create_task(
+                self._initialize_portrait(), name="ombre-portrait-initialize",
+            )
+        return self.portrait_initialization_status()
+
+    async def _initialize_portrait(self):
+        try:
+            async with self._write_lock:
+                async with _engine(DailyPortraitMaintainer, deepcopy(self.service.config)) as engine:
+                    # The legacy loader treats corrupt JSON as empty. An explicit
+                    # initialize request must not replace unreadable saved state.
+                    if os.path.exists(engine.state_path):
+                        with open(engine.state_path, encoding="utf-8") as handle:
+                            stored = json.load(handle)
+                        if not isinstance(stored, dict) or not isinstance(stored.get("runs", []), list):
+                            raise ValueError("invalid portrait state")
+                    state = engine.load_state()
+                    if state.get("runs"):
+                        result = {"status": "exists"}
+                    else:
+                        result = await engine.maintain_daily(
+                            self.service.bucket_mgr, self.service.persona_engine, force=True,
+                        )
+                    self._portrait_result = _result_summary(result)
+        except asyncio.CancelledError:
+            self._portrait_result = {"status": "interrupted"}
+            raise
+        except Exception as exc:
+            self._portrait_result = {"status": "error", "reason": "initialization_failed"}
+            logger.warning("Portrait initialization failed: %s", type(exc).__name__)
 
     async def _loop(self):
         await asyncio.sleep(self.initial_delay)
@@ -98,7 +139,8 @@ class CareScheduler:
             else:
                 async with _engine(ENGINE_TYPES[name], config) as engine:
                     interval = engine.check_interval_minutes * 60
-                    results = await self._run(name, engine, config)
+                    async with self._write_lock:
+                        results = await self._run(name, engine, config)
             if isinstance(results, dict):
                 results = [results]
             summary = [_result_summary(result) for result in results]

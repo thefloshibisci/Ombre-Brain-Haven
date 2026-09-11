@@ -20,7 +20,9 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 import yaml
 
 from starlette.requests import Request
@@ -539,6 +541,48 @@ def _portrait_state(state: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(portrait, Mapping) and isinstance(block := portrait.get(scope), Mapping)
     }
     return result
+
+
+def _portrait_gateway_url() -> str:
+    admin_url = os.environ.get("OMBRE_GATEWAY_ADMIN_URL", "").strip()
+    token = os.environ.get("OMBRE_GATEWAY_TOKEN", "").strip()
+    if not admin_url or not token:
+        return ""
+    parts = urlsplit(admin_url)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        return ""
+    return urlunsplit((parts.scheme, parts.netloc, "/api/portrait/initialize", "", ""))
+
+
+async def _portrait_initialization(request: Request) -> Response:
+    if (err := _auth(request)):
+        return err
+    url = _portrait_gateway_url()
+    if not url:
+        return JSONResponse({"error": "Portrait initialization is unavailable"}, status_code=503)
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        if body != {}:
+            return JSONResponse({"error": "initialization takes no options"}, status_code=400)
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+            response = await client.request(
+                request.method, url,
+                headers={"Authorization": "Bearer " + os.environ["OMBRE_GATEWAY_TOKEN"]},
+                **({"json": {}} if request.method == "POST" else {}),
+            )
+        if response.status_code not in {200, 202}:
+            raise ValueError("gateway rejected initialization request")
+        result = response.json()
+        if not isinstance(result, dict) or not isinstance(result.get("status"), str):
+            raise ValueError("invalid initialization response")
+        return JSONResponse(_project(result, ("status", "reason", "date")), status_code=response.status_code)
+    except Exception as exc:
+        logger.warning("Portrait initialization gateway failed: %s", type(exc).__name__)
+        return JSONResponse({"error": "Portrait initialization service is unavailable"}, status_code=503)
 
 
 def _read_json(path: Path) -> Any:
@@ -1096,13 +1140,19 @@ def register(mcp) -> None:
         if (err := _auth(request)):
             return err
         try:
-            state = _read_json(_path_for("portrait"))
+            path = _path_for("portrait")
+            state = {} if not path.exists() and path.parent.is_dir() and _portrait_gateway_url() else _read_json(path)
             if not isinstance(state, dict):
                 raise ValueError("portrait state must be an object")
+            initialized = bool(state.get("runs"))
             state = _portrait_state(state)
-            return JSONResponse({**state, **_base("ok", available=True), "state": state, "portrait": state.get("portrait", {})})
+            return JSONResponse({**state, **_base("ok", available=True), "state": state, "portrait": state.get("portrait", {}),
+                                 "initialized": initialized, "initialization_available": bool(_portrait_gateway_url())})
         except Exception as exc:
             return _exception(exc, key="state")
+
+    mcp.custom_route("/api/portrait/initialize", methods=["GET"])(_portrait_initialization)
+    mcp.custom_route("/api/portrait/initialize", methods=["POST"])(_portrait_initialization)
 
     @mcp.custom_route("/api/profile-facts", methods=["GET"])
     async def api_profile_facts(request: Request) -> Response:

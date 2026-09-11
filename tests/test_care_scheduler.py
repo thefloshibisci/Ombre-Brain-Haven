@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -20,6 +21,8 @@ def care_config(tmp_path, monkeypatch):
     for name in tuple(os.environ):
         if name.startswith("OMBRE_"):
             monkeypatch.delenv(name, raising=False)
+    # Portrait has a second model call for stable maintenance after its daily patch.
+    monkeypatch.setattr(care_scheduler.DailyPortraitMaintainer, "_api_stable_maintenance", AsyncMock(return_value={}))
     return {
         "buckets_dir": str(tmp_path / "buckets"),
         "state_dir": str(tmp_path / "state"),
@@ -268,3 +271,123 @@ async def test_chat_request_recalls_memory_and_records_round_in_isolated_store(c
     assert len(turns) == 1
     assert turns[0]["session_id"] == "isolated-care-check"
     assert "VIOLET-731" in turns[0]["assistant_text"]
+
+
+@pytest.mark.asyncio
+async def test_portrait_initialization_calls_real_engine_only_once(care_config, monkeypatch):
+    care_config["portrait"]["enabled"] = True
+    service = make_service(care_config)
+    await service.bucket_mgr.create(content="We finished the observatory.", bucket_id="source")
+    generate = AsyncMock(return_value={})
+    monkeypatch.setattr(care_scheduler.DailyPortraitMaintainer, "_api_patch", generate)
+    scheduler = CareScheduler(service)
+    assert scheduler.initialize_portrait()["status"] == "running"
+    task = scheduler._portrait_task
+    scheduler.initialize_portrait()
+    assert scheduler._portrait_task is task
+    await task
+    assert scheduler.portrait_initialization_status()["status"] == "initialized"
+    # A fresh process also sees the persisted runs and cannot force a rewrite.
+    restarted = CareScheduler(service)
+    restarted.initialize_portrait()
+    await restarted._portrait_task
+    assert restarted.portrait_initialization_status()["status"] == "exists"
+    generate.assert_awaited_once()
+    assert "state_path" not in scheduler.portrait_initialization_status()
+
+
+@pytest.mark.asyncio
+async def test_failed_portrait_model_is_retryable(care_config, monkeypatch):
+    care_config["portrait"]["enabled"] = True
+    service = make_service(care_config)
+    await service.bucket_mgr.create(content="A historical portrait source.", bucket_id="portrait-source")
+    generate = AsyncMock(side_effect=RuntimeError("provider failure"))
+    monkeypatch.setattr(care_scheduler.DailyPortraitMaintainer, "_api_patch", generate)
+    scheduler = CareScheduler(service)
+    scheduler.initialize_portrait()
+    await scheduler._portrait_task
+    assert scheduler.portrait_initialization_status() == {"status": "skipped", "reason": "generator_error", "date": datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()}
+    generate.side_effect = None
+    generate.return_value = {}
+    scheduler.initialize_portrait()
+    await scheduler._portrait_task
+    assert scheduler.portrait_initialization_status()["status"] == "initialized"
+
+
+@pytest.mark.asyncio
+async def test_portrait_initialization_does_not_invent_state_without_materials(care_config, monkeypatch):
+    care_config["portrait"]["enabled"] = True
+    generate = AsyncMock()
+    monkeypatch.setattr(care_scheduler.DailyPortraitMaintainer, "_api_patch", generate)
+    scheduler = CareScheduler(make_service(care_config))
+    scheduler.initialize_portrait()
+    await scheduler._portrait_task
+    assert scheduler.portrait_initialization_status()["status"] == "empty"
+    generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unreadable_portrait_is_not_overwritten(care_config):
+    care_config["portrait"]["enabled"] = True
+    path = Path(care_config["state_dir"]) / "portrait_state.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{broken", encoding="utf-8")
+    scheduler = CareScheduler(make_service(care_config))
+    scheduler.initialize_portrait()
+    await scheduler._portrait_task
+    assert scheduler.portrait_initialization_status()["status"] == "error"
+    assert path.read_text(encoding="utf-8") == "{broken"
+
+
+@pytest.mark.asyncio
+async def test_manual_and_automatic_portrait_writes_share_lock_and_cancel(care_config, monkeypatch):
+    entered = asyncio.Event()
+    client = SimpleNamespace(close=AsyncMock())
+
+    class Engine:
+        check_interval_minutes = 5
+        def __init__(self, config):
+            self.client = client
+            self.state_path = str(Path(config["state_dir"]) / "portrait_state.json")
+        def load_state(self):
+            return {}
+        async def maintain_daily(self, *args, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+        async def run_due(self, *args):
+            raise AssertionError("automatic task entered during manual generation")
+
+    monkeypatch.setattr(care_scheduler, "DailyPortraitMaintainer", Engine)
+    monkeypatch.setitem(care_scheduler.ENGINE_TYPES, "portrait", Engine)
+    care_config["portrait"]["enabled"] = True
+    scheduler = CareScheduler(make_service(care_config))
+    scheduler.initialize_portrait()
+    await asyncio.wait_for(entered.wait(), 2)
+    automatic = asyncio.create_task(scheduler.run_once("portrait"))
+    await asyncio.sleep(0)
+    assert not automatic.done()
+    automatic.cancel()
+    await asyncio.gather(automatic, return_exceptions=True)
+    await scheduler.stop()
+    assert scheduler.portrait_initialization_status()["status"] == "interrupted"
+    assert client.close.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_gateway_portrait_endpoint_checks_auth_and_rejects_options():
+    service = gateway.GatewayService.__new__(gateway.GatewayService)
+    service.gateway_token = "isolated-token"
+    service.care_scheduler = SimpleNamespace(
+        initialize_portrait=lambda: {"status": "running"},
+        portrait_initialization_status=lambda: {"status": "idle"},
+    )
+    app = gateway.create_gateway_app(config={"test": True}, service=service)
+    app.state.gateway_service = service
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.post("/api/portrait/initialize", json={})).status_code == 401
+        headers = {"Authorization": "Bearer isolated-token"}
+        assert (await client.post("/api/portrait/initialize", json={"force": True}, headers=headers)).status_code == 400
+        response = await client.post("/api/portrait/initialize", json={}, headers=headers)
+        assert response.status_code == 202
+        assert response.json() == {"status": "running"}
+        assert (await client.get("/api/portrait/initialize", headers=headers)).json() == {"status": "idle"}

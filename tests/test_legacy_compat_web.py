@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -54,6 +55,7 @@ def isolated_runtime(tmp_path, monkeypatch):
         "OMBRE_REMINDER_DB_PATH", "OMBRE_DAILY_CHAT_MEMORY_PENDING_PATH",
         "OMBRE_PERSONA_DB_PATH", "OMBRE_PORTRAIT_STATE_PATH",
         "OMBRE_DREAM_DATA_DIR", "OMBRE_DREAMS_DIR", "OMBRE_WORD_MAP_DB_PATH",
+        "OMBRE_GATEWAY_ADMIN_URL", "OMBRE_GATEWAY_TOKEN",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(sh, "repo_root", str(tmp_path))
@@ -96,12 +98,69 @@ def test_registers_compatibility_routes():
     assert paths == {
         "/api/reminders", "/api/reminders/{reminder_id}", "/api/moments", "/api/daily-chat-memory/pending",
         "/api/persona", "/api/dreams", "/api/dreams/{dream_id}",
-        "/api/portrait-state", "/api/profile-facts", "/api/word-map",
+        "/api/portrait-state", "/api/portrait/initialize", "/api/profile-facts", "/api/word-map",
     }
     assert ("/api/reminders", ("GET",)) in fake.routes
     assert ("/api/reminders", ("POST",)) in fake.routes
     assert ("/api/reminders/{reminder_id}", ("PATCH",)) in fake.routes
     assert all(methods in {("GET",), ("POST",), ("PATCH",)} for _path, methods in fake.routes)
+
+
+@pytest.mark.asyncio
+async def test_portrait_initialization_proxy_is_authenticated_and_scoped(isolated_runtime, monkeypatch):
+    monkeypatch.setenv("OMBRE_GATEWAY_ADMIN_URL", "http://127.0.0.1:8010/api/config")
+    monkeypatch.setenv("OMBRE_GATEWAY_TOKEN", "private-test-token")
+    calls = []
+    class Client:
+        def __init__(self, **options):
+            assert options["follow_redirects"] is False
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def request(self, method, url, **kwargs):
+            calls.append((method, url, kwargs))
+            return httpx.Response(202, json={"status": "running", "state_path": "secret-path", "api_key": "private-test-token", "content": "private"})
+    monkeypatch.setattr(compat.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(sh, "_require_auth", lambda req: JSONResponse({"error": "Unauthorized"}, status_code=401))
+    assert (await compat._portrait_initialization(json_request("/api/portrait/initialize", {}))).status_code == 401
+    assert not calls
+    monkeypatch.setattr(sh, "_require_auth", lambda req: None)
+    assert (await compat._portrait_initialization(json_request("/api/portrait/initialize", {"url": "https://invalid", "force": True}))).status_code == 400
+    response = await compat._portrait_initialization(json_request("/api/portrait/initialize", {}))
+    assert response.status_code == 202
+    assert json.loads(response.body) == {"status": "running"}
+    assert calls == [("POST", "http://127.0.0.1:8010/api/portrait/initialize", {
+        "headers": {"Authorization": "Bearer private-test-token"}, "json": {},
+    })]
+
+
+@pytest.mark.asyncio
+async def test_portrait_proxy_errors_do_not_leak_and_missing_state_can_initialize(isolated_runtime, monkeypatch):
+    monkeypatch.setenv("OMBRE_GATEWAY_ADMIN_URL", "http://127.0.0.1:8010/api/config")
+    monkeypatch.setenv("OMBRE_GATEWAY_TOKEN", "private-test-token")
+    class Client:
+        def __init__(self, **options):
+            pass
+        async def __aenter__(self):
+            raise RuntimeError("secret-path private-test-token")
+        async def __aexit__(self, *args):
+            pass
+    monkeypatch.setattr(compat.httpx, "AsyncClient", Client)
+    response = await compat._portrait_initialization(request("/api/portrait/initialize"))
+    assert response.status_code == 503
+    assert b"secret-path" not in response.body and b"private-test-token" not in response.body
+    fake = FakeMCP(); compat.register(fake)
+    response = await fake.routes[("/api/portrait-state", ("GET",))](request())
+    assert response.status_code == 200
+    data = json.loads(response.body)
+    assert data["initialized"] is False and data["initialization_available"] is True
+    path = isolated_runtime / "state" / "portrait_state.json"
+    assert not path.exists()
+    path.write_text(json.dumps({"runs": [{"date": "2026-09-11", "raw_response": "hidden"}]}), encoding="utf-8")
+    response = await fake.routes[("/api/portrait-state", ("GET",))](request())
+    assert json.loads(response.body)["initialized"] is True
+    assert b"hidden" not in response.body
 
 
 @pytest.mark.asyncio

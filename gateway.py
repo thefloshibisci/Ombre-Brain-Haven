@@ -1933,6 +1933,22 @@ class GatewayService:
                 status_code=500,
             )
 
+    async def handle_portrait_initialization(self, request: Request) -> JSONResponse:
+        auth_result = self._authorize(request.headers.get("Authorization", ""))
+        if auth_result is not None:
+            return auth_result
+        if self.care_scheduler is None:
+            return JSONResponse({"status": "unavailable"}, status_code=503)
+        if request.method == "POST":
+            try:
+                body = await request.json()
+            except ValueError:
+                return JSONResponse({"error": "invalid JSON"}, status_code=400)
+            if body != {}:
+                return JSONResponse({"error": "initialization takes no options"}, status_code=400)
+            return JSONResponse(self.care_scheduler.initialize_portrait(), status_code=202)
+        return JSONResponse(self.care_scheduler.portrait_initialization_status())
+
     async def handle_chat(self, request: Request) -> Response:
         auth_result = self._authorize(request.headers.get("Authorization", ""))
         if auth_result is not None:
@@ -21526,6 +21542,9 @@ def create_gateway_app(
     async def config_route(request: Request) -> Response:
         return await request.app.state.gateway_service.handle_config(request)
 
+    async def portrait_initialization(request: Request) -> Response:
+        return await request.app.state.gateway_service.handle_portrait_initialization(request)
+
     async def injection_debug(request: Request) -> Response:
         return await request.app.state.gateway_service.handle_injection_debug(request)
 
@@ -21543,6 +21562,7 @@ def create_gateway_app(
         routes=[
             Route("/health", health, methods=["GET"]),
             Route("/api/config", config_route, methods=["GET", "POST"]),
+            Route("/api/portrait/initialize", portrait_initialization, methods=["GET", "POST"]),
             Route("/api/debug/injections", injection_debug, methods=["GET"]),
             Route("/api/hook/recall", hook_recall, methods=["POST"]),
             Route("/api/debug/recall-eval", recall_eval_debug, methods=["GET"]),

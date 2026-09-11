@@ -218,7 +218,8 @@ renderCarePersona({profile_id: 'configured-profile', state: {}, sessions: [], ev
 process.stdout.write(elements.get('care-persona-content').innerHTML);
 '''
     completed = subprocess.run(
-        [shutil.which("node"), "-e", script],
+        [shutil.which("node"), "-"],
+        input=script,
         check=True,
         capture_output=True,
         text=True,
@@ -295,7 +296,52 @@ shiftCareMomentsMonth(-1);
 assert.equal(careSelectedMomentDate, '');
 assert.doesNotMatch(elements.get('care-moments-content').innerHTML, /August entry/);
 '''
-    completed = subprocess.run([shutil.which("node"), "-e", script], capture_output=True, text=True, encoding="utf-8")
+    completed = subprocess.run([shutil.which("node"), "-"], input=script, capture_output=True, text=True, encoding="utf-8")
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
+def test_portrait_initialization_progress_deduplicates_and_resumes():
+    html = _read(DASHBOARD)
+    script = r'''
+const assert = require('node:assert/strict');
+const elements = new Map();
+const document = {getElementById(id) {
+  if (!elements.has(id)) elements.set(id, {hidden:false, disabled:false, textContent:'', setAttribute(){}});
+  return elements.get(id);
+}};
+let scheduled;
+const setTimeout = (fn) => { scheduled = fn; return 1; };
+const clearTimeout = () => { scheduled = null; };
+let sends = 0;
+let releasePost;
+const authFetch = async () => { sends++; await new Promise(resolve => { releasePost = resolve; }); return {ok:true}; };
+const readJsonSafe = async () => ({status:'running'});
+let result = {status:'running'};
+const careFetchJson = async (url) => url === '/api/portrait-state' ? {initialized:true} : result;
+function renderCarePortrait(data) { carePortraitInitialized = data.initialized; renderCarePortraitInitialization(); }
+''' + _section(html, "let carePortraitInitialized", "function renderCareFacts") + r'''
+(async () => {
+  carePortraitInitializationAvailable = true;
+  const pending = initializeCarePortrait();
+  await initializeCarePortrait();
+  assert.equal(sends, 1);
+  assert.equal(elements.get('care-portrait-initialize').disabled, true);
+  releasePost();
+  await pending;
+  assert.equal(typeof scheduled, 'function');
+  result = {status:'initialized'};
+  await scheduled();
+  assert.equal(elements.get('care-portrait-initialize').hidden, true);
+  assert.match(elements.get('care-portrait-initialization-status').textContent, /Portrait initialized/);
+  carePortraitInitialized = false;
+  result = {status:'skipped', reason:'generator_error'};
+  await pollCarePortraitInitialization();
+  assert.equal(elements.get('care-portrait-initialize').disabled, false);
+  assert.match(elements.get('care-portrait-initialization-status').textContent, /Model request failed/);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    completed = subprocess.run([shutil.which("node"), "-"], input=script, capture_output=True, text=True, encoding="utf-8")
     assert completed.returncode == 0, completed.stderr
 
 
