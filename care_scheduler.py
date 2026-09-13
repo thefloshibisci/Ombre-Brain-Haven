@@ -83,6 +83,39 @@ class CareScheduler:
     def portrait_initialization_status(self):
         return deepcopy(self._portrait_result)
 
+    async def list_daily_chat_memory_pending(self, *, status="pending", limit=50):
+        """Read the reflection queue through the same engine used by the scheduler."""
+        async with self._write_lock:
+            async with _engine(ReflectionEngine, deepcopy(self.service.config)) as engine:
+                return engine.list_daily_chat_memory_pending(status=status, limit=limit)
+
+    async def run_daily_chat_memory(self, *, key="", mode="", force=False):
+        """Run one explicitly requested reflection pass under the Care write lock."""
+        async with self._write_lock:
+            async with _engine(ReflectionEngine, deepcopy(self.service.config)) as engine:
+                return await engine.run_daily_chat_memory(
+                    self.service.bucket_mgr,
+                    conversation_turn_store=self.service.state_store,
+                    raw_event_store=self.service.raw_event_store,
+                    persona_engine=self.service.persona_engine,
+                    embedding_engine=self.service.embedding_engine,
+                    key=key,
+                    mode=mode,
+                    force=force,
+                )
+
+    async def confirm_daily_chat_memory(self, candidate_ids, *, action="confirm", edits=None):
+        """Apply candidate decisions through the canonical reflection writer."""
+        async with self._write_lock:
+            async with _engine(ReflectionEngine, deepcopy(self.service.config)) as engine:
+                return await engine.confirm_daily_chat_memory(
+                    candidate_ids,
+                    self.service.bucket_mgr,
+                    embedding_engine=self.service.embedding_engine,
+                    action=action,
+                    edits=edits,
+                )
+
     def initialize_portrait(self):
         if self._portrait_task is None or self._portrait_task.done():
             self._portrait_result = {"status": "running"}

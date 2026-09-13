@@ -212,6 +212,22 @@ def test_entrypoint_prefers_explicit_proxy_port(monkeypatch):
     assert "PORT" not in proxy_env
 
 
+@pytest.mark.parametrize("path", [
+    "/api/search-raw",
+    "/api/recall-debug",
+    "/api/gateway-injections",
+    "/api/debug/injections",
+    "/api/daily-chat-memory/pending",
+    "/api/daily-chat-memory/run",
+    "/api/daily-chat-memory/confirm",
+])
+def test_gateway_owned_dashboard_paths_route_to_gateway(monkeypatch, path):
+    monkeypatch.setenv("OMBRE_GATEWAY_URL", "http://gateway.internal")
+    target, forwarded = proxy_server._target_for_path(path)
+    assert target == "http://gateway.internal"
+    assert forwarded == path
+
+
 @pytest.mark.parametrize("role", ["brain", "gateway"])
 def test_entrypoint_maps_legacy_model_settings_to_v3(role, monkeypatch):
     for canonical, aliases in entrypoint_zeabur.MODEL_ENV_ALIASES.items():

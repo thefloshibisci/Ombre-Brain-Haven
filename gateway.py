@@ -2305,6 +2305,108 @@ class GatewayService:
             }
         )
 
+    async def handle_raw_search(self, request: Request) -> JSONResponse:
+        """Authenticated read of Gateway's append-only visible dialogue archive."""
+        auth_result = self._authorize(request.headers.get("Authorization", ""))
+        if auth_result is not None:
+            return auth_result
+        try:
+            limit = max(1, min(100, int(request.query_params.get("limit", "20"))))
+        except ValueError:
+            limit = 20
+        try:
+            result = self.raw_event_store.search(
+                str(request.query_params.get("q", request.query_params.get("query", "")) or ""),
+                limit=limit,
+                source=str(request.query_params.get("source", "") or ""),
+                role=str(request.query_params.get("role", "") or ""),
+                conversation_id=str(request.query_params.get("conversation_id", "") or ""),
+                session_id=str(request.query_params.get("session_id", "") or ""),
+                since=str(request.query_params.get("since", "") or ""),
+                until=str(request.query_params.get("until", "") or ""),
+            )
+            return JSONResponse(result)
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception:
+            return JSONResponse({"error": "raw archive unavailable"}, status_code=503)
+
+    async def handle_daily_chat_memory_pending(self, request: Request) -> JSONResponse:
+        auth_result = self._authorize(request.headers.get("Authorization", ""))
+        if auth_result is not None:
+            return auth_result
+        scheduler = self.care_scheduler
+        if scheduler is None:
+            return JSONResponse({"status": "unavailable", "items": []}, status_code=503)
+        try:
+            limit = max(1, min(200, int(request.query_params.get("limit", "50"))))
+        except ValueError:
+            limit = 50
+        status = str(request.query_params.get("status", "pending") or "pending").strip()
+        try:
+            items = await scheduler.list_daily_chat_memory_pending(status=status, limit=limit)
+            return JSONResponse({"status": "ok", "count": len(items), "items": items, "read_only": False})
+        except Exception:
+            return JSONResponse({"error": "daily memory queue unavailable"}, status_code=503)
+
+    async def handle_daily_chat_memory_run(self, request: Request) -> JSONResponse:
+        auth_result = self._authorize(request.headers.get("Authorization", ""))
+        if auth_result is not None:
+            return auth_result
+        scheduler = self.care_scheduler
+        if scheduler is None:
+            return JSONResponse({"status": "unavailable"}, status_code=503)
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "invalid daily memory request"}, status_code=400)
+        key = str(payload.get("key") or payload.get("date") or "").strip()
+        mode = str(payload.get("mode") or "").strip()
+        force = payload.get("force") is True
+        try:
+            result = await scheduler.run_daily_chat_memory(key=key, mode=mode, force=force)
+            return JSONResponse(result, status_code=200)
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception:
+            return JSONResponse({"error": "daily memory run failed"}, status_code=503)
+
+    async def handle_daily_chat_memory_confirm(self, request: Request) -> JSONResponse:
+        auth_result = self._authorize(request.headers.get("Authorization", ""))
+        if auth_result is not None:
+            return auth_result
+        scheduler = self.care_scheduler
+        if scheduler is None:
+            return JSONResponse({"status": "unavailable"}, status_code=503)
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "invalid candidate decision"}, status_code=400)
+        candidate_ids = payload.get("candidate_ids", payload.get("ids", []))
+        if isinstance(candidate_ids, str):
+            candidate_ids = [candidate_ids]
+        if not isinstance(candidate_ids, list) or not all(isinstance(item, (str, int)) for item in candidate_ids):
+            return JSONResponse({"error": "candidate_ids must be a list"}, status_code=400)
+        action = str(payload.get("action") or "confirm").strip().lower()
+        if action not in {"confirm", "reject"}:
+            return JSONResponse({"error": "action must be confirm or reject"}, status_code=400)
+        edits = payload.get("edits", {})
+        if not isinstance(edits, dict):
+            return JSONResponse({"error": "edits must be an object"}, status_code=400)
+        try:
+            result = await scheduler.confirm_daily_chat_memory(
+                [str(item) for item in candidate_ids], action=action, edits=edits,
+            )
+            return JSONResponse(result)
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception:
+            return JSONResponse({"error": "candidate decision failed"}, status_code=503)
+
     async def handle_hook_recall(self, request: Request) -> JSONResponse:
         auth_result = self._authorize(request.headers.get("Authorization", ""))
         if auth_result is not None:
@@ -21557,6 +21659,18 @@ def create_gateway_app(
     async def upstream_usage_debug(request: Request) -> Response:
         return await request.app.state.gateway_service.handle_upstream_usage_debug(request)
 
+    async def raw_search(request: Request) -> Response:
+        return await request.app.state.gateway_service.handle_raw_search(request)
+
+    async def daily_chat_memory_pending(request: Request) -> Response:
+        return await request.app.state.gateway_service.handle_daily_chat_memory_pending(request)
+
+    async def daily_chat_memory_run(request: Request) -> Response:
+        return await request.app.state.gateway_service.handle_daily_chat_memory_run(request)
+
+    async def daily_chat_memory_confirm(request: Request) -> Response:
+        return await request.app.state.gateway_service.handle_daily_chat_memory_confirm(request)
+
     app = Starlette(
         debug=False,
         routes=[
@@ -21564,9 +21678,15 @@ def create_gateway_app(
             Route("/api/config", config_route, methods=["GET", "POST"]),
             Route("/api/portrait/initialize", portrait_initialization, methods=["GET", "POST"]),
             Route("/api/debug/injections", injection_debug, methods=["GET"]),
+            Route("/api/gateway-injections", injection_debug, methods=["GET"]),
+            Route("/api/search-raw", raw_search, methods=["GET"]),
             Route("/api/hook/recall", hook_recall, methods=["POST"]),
             Route("/api/debug/recall-eval", recall_eval_debug, methods=["GET"]),
+            Route("/api/recall-debug", recall_eval_debug, methods=["GET"]),
             Route("/api/debug/upstream-usage", upstream_usage_debug, methods=["GET"]),
+            Route("/api/daily-chat-memory/pending", daily_chat_memory_pending, methods=["GET"]),
+            Route("/api/daily-chat-memory/run", daily_chat_memory_run, methods=["POST"]),
+            Route("/api/daily-chat-memory/confirm", daily_chat_memory_confirm, methods=["POST"]),
             Route("/v1/models", models, methods=["GET"]),
             Route("/v1/chat/completions", chat_completions, methods=["POST"]),
             Route("/v1/messages", anthropic_messages, methods=["POST"]),

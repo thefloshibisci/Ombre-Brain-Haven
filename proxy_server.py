@@ -25,6 +25,17 @@ DEFAULT_TARGETS = {
     "xinchao": "http://127.0.0.1:18110",
 }
 
+GATEWAY_API_PATHS = (
+    "/api/search-raw",
+    "/api/recall-debug",
+    "/api/gateway-injections",
+    "/api/debug/injections",
+    "/api/debug/recall-eval",
+    "/api/debug/upstream-usage",
+    "/api/hook/recall",
+    "/api/daily-chat-memory/",
+)
+
 
 def _target_for_path(path: str) -> tuple[str, str]:
     if path == "/xinchao" or path.startswith("/xinchao/"):
@@ -33,6 +44,8 @@ def _target_for_path(path: str) -> tuple[str, str]:
     if path == "/v1" or path.startswith("/v1/"):
         gateway_path = "/health" if path.rstrip("/") == "/v1/health" else path
         return os.environ.get("OMBRE_GATEWAY_URL", DEFAULT_TARGETS["gateway"]), gateway_path
+    if any(path == prefix or path.startswith(prefix) for prefix in GATEWAY_API_PATHS):
+        return os.environ.get("OMBRE_GATEWAY_URL", DEFAULT_TARGETS["gateway"]), path
     return os.environ.get("OMBRE_BRAIN_URL", DEFAULT_TARGETS["brain"]), path
 
 
