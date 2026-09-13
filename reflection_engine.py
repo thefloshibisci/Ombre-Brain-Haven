@@ -499,16 +499,19 @@ class ReflectionEngine:
         except FileNotFoundError:
             return {"items": [], "cursor": {}}
         except Exception as exc:
-            logger.warning("Daily chat memory pending read failed: %s", exc)
-            return {"items": [], "cursor": {}}
+            raise ValueError("Daily memory queue is unreadable") from exc
         if isinstance(data, dict):
             items = data.get("items")
+            if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+                raise ValueError("Invalid daily memory queue")
             cursor = data.get("cursor") if isinstance(data.get("cursor"), dict) else {}
             return {
                 "items": [item for item in (items or []) if isinstance(item, dict)],
                 "cursor": cursor,
             }
-        return {"items": [item for item in (data or []) if isinstance(item, dict)], "cursor": {}}
+        if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+            raise ValueError("Invalid daily memory queue")
+        return {"items": data, "cursor": {}}
 
     def _load_daily_chat_memory_cursor(self) -> dict:
         cursor = self._load_daily_chat_memory_payload().get("cursor")
@@ -2284,6 +2287,7 @@ class ReflectionEngine:
         mode: str = "",
         force: bool = False,
         now: datetime | None = None,
+        session_id: str = "",
     ) -> dict:
         effective_mode = self._normalize_daily_chat_memory_mode(mode or self.daily_chat_memory_mode)
         if effective_mode == "off" or self.daily_chat_memory_max_per_day <= 0:
@@ -2297,7 +2301,7 @@ class ReflectionEngine:
         profile_id = str(getattr(persona_engine, "profile_id", "") or "default")
         turns = []
         turn_source = ""
-        raw_event_cursor_id = 0 if force else self._daily_chat_memory_last_raw_event_id(profile_id)
+        raw_event_cursor_id = 0 if force or session_id else self._daily_chat_memory_last_raw_event_id(profile_id)
         max_seen_raw_event_id = 0
         raw_events_cursor_exhausted = False
         if raw_event_store:
@@ -2306,6 +2310,7 @@ class ReflectionEngine:
                     start_at=start,
                     end_at=end,
                     limit=self.daily_chat_memory_turn_limit,
+                    **({"session_id": session_id} if session_id else {}),
                 )
             except Exception as exc:
                 logger.warning("Daily chat memory raw event read failed: %s", exc)
@@ -2339,7 +2344,7 @@ class ReflectionEngine:
             raw_turns = []
             if raw_events_cursor_exhausted:
                 raw_turns = []
-            elif not turns and conversation_turn_store:
+            elif not turns and conversation_turn_store and not session_id:
                 raw_turns = conversation_turn_store.list_conversation_turns_between(
                     profile_id=profile_id,
                     start_at=start,
@@ -2400,7 +2405,7 @@ class ReflectionEngine:
             pending = self._store_daily_chat_memory_pending(candidates, force=force)
             cursor_updated = (
                 self._update_daily_chat_memory_raw_cursor(profile_id, max_seen_raw_event_id, key)
-                if turn_source == "raw_events"
+                if turn_source == "raw_events" and not session_id
                 else False
             )
             return {
@@ -2423,7 +2428,7 @@ class ReflectionEngine:
         )
         cursor_updated = (
             self._update_daily_chat_memory_raw_cursor(profile_id, max_seen_raw_event_id, key)
-            if turn_source == "raw_events"
+            if turn_source == "raw_events" and not session_id
             else False
         )
         return {
@@ -3340,9 +3345,22 @@ class ReflectionEngine:
         os.makedirs(os.path.dirname(self.daily_chat_memory_pending_path), exist_ok=True)
         if cursor is None:
             cursor = self._load_daily_chat_memory_cursor()
-        payload = {"items": items[-500:], "cursor": cursor or {}}
-        with open(self.daily_chat_memory_pending_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
+        # Never evict an undecided candidate. Only completed history is bounded.
+        completed = {id(item) for item in [row for row in items if row.get("status") in {"confirmed", "rejected"}][-500:]}
+        retained = [row for row in items if row.get("status") not in {"confirmed", "rejected"} or id(row) in completed]
+        payload = {"items": retained, "cursor": cursor or {}}
+        import tempfile
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=os.path.dirname(self.daily_chat_memory_pending_path), delete=False) as handle:
+                temporary = handle.name
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.daily_chat_memory_pending_path)
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
 
     def _refresh_daily_chat_memory_pending_items(self, items: list[dict]) -> tuple[list[dict], bool]:
         changed = False

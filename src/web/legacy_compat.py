@@ -1051,6 +1051,9 @@ def register(mcp) -> None:
     async def api_daily_chat_memory_pending(request: Request) -> Response:
         if (err := _auth(request)):
             return err
+        from . import gateway_memory
+        if gateway_memory.configured():
+            return await gateway_memory.forward(request, "/api/daily-chat-memory/pending")
         wanted = str(request.query_params.get("status") or "pending").strip()
         try:
             path = _path_for("pending")

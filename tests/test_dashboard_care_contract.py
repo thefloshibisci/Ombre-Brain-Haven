@@ -137,7 +137,7 @@ def test_care_loads_are_independent_and_keep_current_filters():
     assert "const requestedReminderStatus = careReminderStatus;" in care
     assert "status=' + encodeURIComponent(requestedReminderStatus)" in care
     assert "/api/moments?limit=200" in care
-    assert "/api/daily-chat-memory/pending?status=pending&limit=12" in care
+    assert "/api/daily-chat-memory/pending?status=' + encodeURIComponent(requestedPendingStatus)" in care
     assert "/api/persona?events_limit=8&sessions_limit=4" in care
     assert "generation !== careLoadGeneration" in care
     assert "generation !== careReminderLoadGeneration" in care

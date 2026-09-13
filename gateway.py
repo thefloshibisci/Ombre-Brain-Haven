@@ -2315,21 +2315,61 @@ class GatewayService:
         except ValueError:
             limit = 20
         try:
+            since = str(request.query_params.get("since", "") or "").strip()
+            until = str(request.query_params.get("until", "") or "").strip()
+            boundaries = []
+            for value, is_end in ((since, False), (until, True)):
+                if not value:
+                    boundaries.append("")
+                    continue
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if len(value) == 10 and is_end:
+                    parsed += timedelta(days=1, microseconds=-1000)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+                boundaries.append(parsed.isoformat(timespec="milliseconds"))
+            if all(boundaries) and datetime.fromisoformat(boundaries[0]) > datetime.fromisoformat(boundaries[1]):
+                raise ValueError("invalid date range")
+            role = str(request.query_params.get("role", "") or "")
+            if role not in {"", "user", "assistant"}:
+                raise ValueError("invalid role")
+            ids = str(request.query_params.get("event_ids", "") or "")
+            event_ids = [int(value) for value in ids.split(",")] if ids else []
             result = self.raw_event_store.search(
                 str(request.query_params.get("q", request.query_params.get("query", "")) or ""),
                 limit=limit,
                 source=str(request.query_params.get("source", "") or ""),
-                role=str(request.query_params.get("role", "") or ""),
+                role=role,
                 conversation_id=str(request.query_params.get("conversation_id", "") or ""),
                 session_id=str(request.query_params.get("session_id", "") or ""),
-                since=str(request.query_params.get("since", "") or ""),
-                until=str(request.query_params.get("until", "") or ""),
+                since=boundaries[0], until=boundaries[1], event_ids=event_ids,
             )
-            return JSONResponse(result)
-        except (TypeError, ValueError) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            fields = ("id", "source", "source_event_id", "role", "text", "created_at", "session_id", "conversation_id", "client")
+            return JSONResponse({**result, "items": [{k: row[k] for k in fields if k in row} for row in result["items"]]})
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "Invalid archive filter"}, status_code=400)
         except Exception:
             return JSONResponse({"error": "raw archive unavailable"}, status_code=503)
+
+    async def handle_memory_trace(self, request: Request) -> JSONResponse:
+        if (error := self._authorize(request.headers.get("Authorization", ""))) is not None:
+            return error
+        try:
+            limit = max(1, min(100, int(request.query_params.get("limit", "20"))))
+            rows = self.state_store.list_injection_debug(
+                session_id=request.query_params.get("session_id", ""), limit=limit, include_context=False,
+            )
+            fields = ("recalled_bucket_ids", "diffused_bucket_ids", "injected_bucket_ids", "recalled_moment_ids", "diffused_moment_ids", "xinchao_context_injected", "date_recall_injected", "just_now_context_injected", "query")
+            items = [{
+                "id": row["id"], "session_id": row["session_id"], "round_id": row["round_id"],
+                "created_at": row["created_at"],
+                "payload": {k: row["payload"][k] for k in fields if k in row.get("payload", {})},
+            } for row in rows]
+            return JSONResponse({"status": "ok", "kind": "recorded_injections", "count": len(items), "items": items})
+        except ValueError:
+            return JSONResponse({"error": "Invalid trace filter"}, status_code=400)
+        except Exception:
+            return JSONResponse({"error": "Gateway trace unavailable"}, status_code=503)
 
     async def handle_daily_chat_memory_pending(self, request: Request) -> JSONResponse:
         auth_result = self._authorize(request.headers.get("Authorization", ""))
@@ -2343,9 +2383,16 @@ class GatewayService:
         except ValueError:
             limit = 50
         status = str(request.query_params.get("status", "pending") or "pending").strip()
+        if status not in {"pending", "confirmed", "rejected", "all"}:
+            return JSONResponse({"error": "invalid candidate status"}, status_code=400)
         try:
             items = await scheduler.list_daily_chat_memory_pending(status=status, limit=limit)
-            return JSONResponse({"status": "ok", "count": len(items), "items": items, "read_only": False})
+            fields = ("id", "title", "content", "date", "kind", "tags", "domain", "importance", "valence", "arousal", "reason", "source_event_ids", "source_turn_ids", "confidence", "status", "created_at", "confirmed_at", "rejected_at", "bucket_id")
+            projected = []
+            for item in items:
+                row = {**(item.get("candidate") or {}), **{k: v for k, v in item.items() if k != "candidate"}}
+                projected.append({k: row[k] for k in fields if k in row})
+            return JSONResponse({"status": "ok", "available": True, "count": len(projected), "items": projected, "read_only": False})
         except Exception:
             return JSONResponse({"error": "daily memory queue unavailable"}, status_code=503)
 
@@ -2356,6 +2403,8 @@ class GatewayService:
         scheduler = self.care_scheduler
         if scheduler is None:
             return JSONResponse({"status": "unavailable"}, status_code=503)
+        if request.method == "GET":
+            return JSONResponse(scheduler.daily_chat_memory_status())
         try:
             payload = await request.json()
         except Exception:
@@ -2363,13 +2412,16 @@ class GatewayService:
         if not isinstance(payload, dict):
             return JSONResponse({"error": "invalid daily memory request"}, status_code=400)
         key = str(payload.get("key") or payload.get("date") or "").strip()
-        mode = str(payload.get("mode") or "").strip()
-        force = payload.get("force") is True
+        session_id = str(payload.get("session_id") or "").strip()
+        if payload.keys() - {"key", "date", "session_id"} or not session_id or len(session_id) > 256:
+            return JSONResponse({"error": "A session_id and date are required"}, status_code=400)
         try:
-            result = await scheduler.run_daily_chat_memory(key=key, mode=mode, force=force)
-            return JSONResponse(result, status_code=200)
-        except (TypeError, ValueError) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            if len(key) != 10 or datetime.strptime(key, "%Y-%m-%d").strftime("%Y-%m-%d") != key:
+                raise ValueError("invalid date")
+            result = scheduler.start_daily_chat_memory(key=key, session_id=session_id)
+            return JSONResponse(result, status_code=202)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "Invalid generation date"}, status_code=400)
         except Exception:
             return JSONResponse({"error": "daily memory run failed"}, status_code=503)
 
@@ -2389,21 +2441,21 @@ class GatewayService:
         candidate_ids = payload.get("candidate_ids", payload.get("ids", []))
         if isinstance(candidate_ids, str):
             candidate_ids = [candidate_ids]
-        if not isinstance(candidate_ids, list) or not all(isinstance(item, (str, int)) for item in candidate_ids):
+        if not isinstance(candidate_ids, list) or not 1 <= len(candidate_ids) <= 100 or not all(isinstance(item, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", item) for item in candidate_ids):
             return JSONResponse({"error": "candidate_ids must be a list"}, status_code=400)
         action = str(payload.get("action") or "confirm").strip().lower()
         if action not in {"confirm", "reject"}:
             return JSONResponse({"error": "action must be confirm or reject"}, status_code=400)
         edits = payload.get("edits", {})
-        if not isinstance(edits, dict):
+        if not isinstance(edits, dict) or not all(key in candidate_ids and isinstance(value, dict) for key, value in edits.items()):
             return JSONResponse({"error": "edits must be an object"}, status_code=400)
         try:
             result = await scheduler.confirm_daily_chat_memory(
                 [str(item) for item in candidate_ids], action=action, edits=edits,
             )
             return JSONResponse(result)
-        except (TypeError, ValueError) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "Invalid candidate decision or unreadable queue"}, status_code=400)
         except Exception:
             return JSONResponse({"error": "candidate decision failed"}, status_code=503)
 
@@ -21662,6 +21714,9 @@ def create_gateway_app(
     async def raw_search(request: Request) -> Response:
         return await request.app.state.gateway_service.handle_raw_search(request)
 
+    async def memory_trace(request: Request) -> Response:
+        return await request.app.state.gateway_service.handle_memory_trace(request)
+
     async def daily_chat_memory_pending(request: Request) -> Response:
         return await request.app.state.gateway_service.handle_daily_chat_memory_pending(request)
 
@@ -21678,14 +21733,14 @@ def create_gateway_app(
             Route("/api/config", config_route, methods=["GET", "POST"]),
             Route("/api/portrait/initialize", portrait_initialization, methods=["GET", "POST"]),
             Route("/api/debug/injections", injection_debug, methods=["GET"]),
-            Route("/api/gateway-injections", injection_debug, methods=["GET"]),
+            Route("/api/gateway-injections", memory_trace, methods=["GET"]),
             Route("/api/search-raw", raw_search, methods=["GET"]),
             Route("/api/hook/recall", hook_recall, methods=["POST"]),
             Route("/api/debug/recall-eval", recall_eval_debug, methods=["GET"]),
-            Route("/api/recall-debug", recall_eval_debug, methods=["GET"]),
+            Route("/api/recall-debug", memory_trace, methods=["GET"]),
             Route("/api/debug/upstream-usage", upstream_usage_debug, methods=["GET"]),
             Route("/api/daily-chat-memory/pending", daily_chat_memory_pending, methods=["GET"]),
-            Route("/api/daily-chat-memory/run", daily_chat_memory_run, methods=["POST"]),
+            Route("/api/daily-chat-memory/run", daily_chat_memory_run, methods=["GET", "POST"]),
             Route("/api/daily-chat-memory/confirm", daily_chat_memory_confirm, methods=["POST"]),
             Route("/v1/models", models, methods=["GET"]),
             Route("/v1/chat/completions", chat_completions, methods=["POST"]),

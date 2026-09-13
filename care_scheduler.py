@@ -59,6 +59,8 @@ class CareScheduler:
         self._write_lock = asyncio.Lock()
         self._portrait_task = None
         self._portrait_result = {"status": "idle"}
+        self._memory_task = None
+        self._memory_result = {"status": "idle"}
         self._jobs = {name: {"status": "waiting"} for name in ENGINE_TYPES}
 
     def status(self):
@@ -75,7 +77,8 @@ class CareScheduler:
     async def stop(self):
         task, self._task = self._task, None
         portrait_task, self._portrait_task = self._portrait_task, None
-        tasks = [item for item in (task, portrait_task) if item is not None]
+        memory_task, self._memory_task = self._memory_task, None
+        tasks = [item for item in (task, portrait_task, memory_task) if item is not None]
         for item in tasks:
             item.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -89,7 +92,30 @@ class CareScheduler:
             async with _engine(ReflectionEngine, deepcopy(self.service.config)) as engine:
                 return engine.list_daily_chat_memory_pending(status=status, limit=limit)
 
-    async def run_daily_chat_memory(self, *, key="", mode="", force=False):
+    def daily_chat_memory_status(self):
+        return deepcopy(self._memory_result)
+
+    def start_daily_chat_memory(self, *, key, session_id):
+        if self._memory_task is None or self._memory_task.done():
+            self._memory_result = {"status": "running", "date": key, "session_id": session_id}
+            self._memory_task = asyncio.create_task(self._generate_daily_chat_memory(key, session_id))
+        return self.daily_chat_memory_status()
+
+    async def _generate_daily_chat_memory(self, key, session_id):
+        try:
+            result = await self.run_daily_chat_memory(key=key, mode="review", session_id=session_id)
+            self._memory_result = {
+                name: result[name] for name in ("status", "reason", "date", "turns", "added", "updated", "existing", "window_summaries") if name in result
+            }
+        except asyncio.CancelledError:
+            self._memory_result = {"status": "interrupted"}
+            raise
+        except Exception as exc:
+            logger.warning("Daily memory generation failed: %s", type(exc).__name__)
+            self._memory_result = {"status": "error", "reason": "generation_failed"}
+        self._memory_result["session_id"] = session_id
+
+    async def run_daily_chat_memory(self, *, key="", mode="", force=False, session_id=""):
         """Run one explicitly requested reflection pass under the Care write lock."""
         async with self._write_lock:
             async with _engine(ReflectionEngine, deepcopy(self.service.config)) as engine:
@@ -102,6 +128,7 @@ class CareScheduler:
                     key=key,
                     mode=mode,
                     force=force,
+                    session_id=session_id,
                 )
 
     async def confirm_daily_chat_memory(self, candidate_ids, *, action="confirm", edits=None):

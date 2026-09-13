@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -111,8 +112,8 @@ class RawEventStore:
         self.fts_enabled = False
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+    def _connect(self, *, readonly=False) -> sqlite3.Connection:
+        conn = sqlite3.connect(Path(self.db_path).resolve().as_uri() + "?mode=ro", uri=True) if readonly else sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -213,6 +214,7 @@ class RawEventStore:
         session_id: str = "",
         since: str = "",
         until: str = "",
+        event_ids: list[int] | None = None,
     ) -> dict[str, Any]:
         safe_limit = max(1, min(100, int(limit or 10)))
         cleaned_query = str(query or "").strip()
@@ -224,6 +226,10 @@ class RawEventStore:
             since=since,
             until=until,
         )
+        if event_ids:
+            ids = [int(value) for value in event_ids[:100]]
+            filters += " AND e.id IN (" + ",".join("?" for _ in ids) + ")"
+            params.extend(ids)
         rows = self._search_fts(cleaned_query, filters, params, safe_limit) if cleaned_query else []
         if len(rows) < safe_limit:
             rows = self._merge_rows(
@@ -293,7 +299,7 @@ class RawEventStore:
         # different UTC offset while still using idx_raw_events_created.
         coarse_start = (start - timedelta(days=1)).date().isoformat()
         coarse_end = (end + timedelta(days=1)).date().isoformat()
-        conn = self._connect()
+        conn = self._connect(readonly=True)
         rows = conn.execute(
             f"""
             SELECT e.*
@@ -520,10 +526,10 @@ class RawEventStore:
             clauses.append("e.session_id = ?")
             params.append(str(session_id))
         if since:
-            clauses.append("e.created_at >= ?")
+            clauses.append("julianday(e.created_at) >= julianday(?)")
             params.append(str(since))
         if until:
-            clauses.append("e.created_at <= ?")
+            clauses.append("julianday(e.created_at) <= julianday(?)")
             params.append(str(until))
         return (" AND " + " AND ".join(clauses)) if clauses else "", params
 
@@ -531,7 +537,7 @@ class RawEventStore:
         if not self.fts_enabled or not query:
             return []
         match = '"' + query.replace('"', '""') + '"'
-        conn = self._connect()
+        conn = self._connect(readonly=True)
         try:
             return conn.execute(
                 f"""
@@ -550,7 +556,7 @@ class RawEventStore:
             conn.close()
 
     def _search_like(self, query: str, filters: str, params: list[Any], limit: int) -> list[sqlite3.Row]:
-        conn = self._connect()
+        conn = self._connect(readonly=True)
         try:
             return conn.execute(
                 f"""
@@ -566,7 +572,7 @@ class RawEventStore:
             conn.close()
 
     def _search_recent(self, filters: str, params: list[Any], limit: int) -> list[sqlite3.Row]:
-        conn = self._connect()
+        conn = self._connect(readonly=True)
         try:
             return conn.execute(
                 f"""

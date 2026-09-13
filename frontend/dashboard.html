@@ -2149,6 +2149,18 @@
   .care-toolbar { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin:10px 0; }
   .care-toolbar button, .care-toolbar select { padding:5px 8px; font-size:11px; }
   .care-toolbar .active { border-color:var(--accent); color:var(--accent); }
+  .care-archive { margin:14px 0 22px; padding:12px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .care-archive h3 { font-size:15px; margin-bottom:10px; }
+  .care-archive form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+  .care-archive label { display:flex; flex-direction:column; gap:5px; font-size:12px; min-width:0; }
+  .care-archive input, .care-archive select { box-sizing:border-box; width:100%; min-width:0; padding:7px; background:var(--surface); border:1px solid var(--border); border-radius:6px; color:var(--text); font:inherit; }
+  .care-archive .care-item { border:0; border-bottom:1px solid var(--border); border-radius:0; background:transparent; }
+  .care-archive-output { max-height:460px; overflow:auto; margin-top:12px; overflow-wrap:anywhere; }
+  .care-editor { display:flex; flex-direction:column; gap:10px; }
+  .care-editor label { display:flex; flex-direction:column; gap:5px; font-size:12px; }
+  .care-editor textarea, .care-editor input { box-sizing:border-box; width:100%; padding:8px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:6px; font:inherit; }
+  .care-editor textarea { min-height:180px; resize:vertical; }
+  @media(max-width:600px) { .care-archive form { grid-template-columns:minmax(0,1fr); } }
   .care-form { display:none; margin:10px 0 12px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-control); background:rgba(255,255,255,.16); }
   .care-form.open { display:block; }
   .care-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
@@ -2601,6 +2613,20 @@
       </div>
       <div style="margin-top:8px;color:var(--text-dim);font-size:12px;line-height:1.65;">这里把旧 Haven 的照顾线索收拢成只读概览；每块单独读取，某个兼容 API 不可用时不会影响其他内容。</div>
     </div>
+    <section class="care-archive" aria-labelledby="care-archive-heading">
+      <h3 id="care-archive-heading">对话原文与召回记录</h3>
+      <form id="care-archive-form">
+        <label>记录类型<select id="care-archive-mode"><option value="raw">对话原文</option><option value="trace">实际召回记录</option></select></label>
+        <label>会话 ID<input id="care-archive-session" maxlength="256" autocomplete="off"></label>
+        <label>关键词<input id="care-archive-query" maxlength="500" autocomplete="off"></label>
+        <label>开始日期<input id="care-archive-since" type="date"></label>
+        <label>结束日期<input id="care-archive-until" type="date"></label>
+        <label>角色<select id="care-archive-role"><option value="">全部</option><option value="user">用户</option><option value="assistant">助手</option></select></label>
+        <div class="care-toolbar"><button type="submit" class="btn-secondary" title="查询记录" aria-label="查询记录"><i data-lucide="search"></i></button></div>
+      </form>
+      <div id="care-archive-status" role="status" aria-live="polite"></div>
+      <div id="care-archive-results" class="care-archive-output"></div>
+    </section>
     <div class="care-grid">
       <div class="config-section care-card" id="care-reminders-section">
         <div class="care-card-head"><h3>照顾备忘 <span class="sec-en">Care memos</span></h3><div style="display:flex;align-items:center;gap:7px;"><span id="care-reminders-count" class="care-card-meta" aria-live="polite"></span><button id="care-reminder-add-button" type="button" class="btn-secondary" style="padding:4px 8px;font-size:11px;">新增</button></div></div>
@@ -2633,6 +2659,12 @@
       </div>
       <div class="config-section care-card" id="care-pending-section">
         <div class="care-card-head"><h3>自动记忆待审 <span class="sec-en">Pending memory</span></h3><span id="care-pending-count" class="care-card-meta" aria-live="polite"></span></div>
+        <form id="care-memory-run-form" class="care-form open">
+          <div class="care-form-grid"><label>素材日期<input id="care-memory-date" type="date" required></label><label>会话 ID<input id="care-memory-session" maxlength="256" required autocomplete="off"></label></div>
+          <div class="care-form-actions"><button type="submit" class="btn-secondary" id="care-memory-run-button"><i data-lucide="sparkles"></i> 生成待审候选</button></div>
+          <div id="care-memory-run-status" role="status" aria-live="polite"></div>
+        </form>
+        <div class="care-toolbar"><select id="care-pending-filter" aria-label="候选状态"><option value="pending">待审</option><option value="confirmed">已保留</option><option value="rejected">已舍弃</option></select><button id="care-pending-refresh" class="btn-secondary" title="刷新候选" aria-label="刷新候选"><i data-lucide="refresh-cw"></i></button></div>
         <div id="care-pending-content" class="care-list"><div class="care-empty">点击刷新加载… / Click Refresh to load…</div></div>
       </div>
       <div class="config-section care-card" id="care-dreams-section">
@@ -9422,6 +9454,9 @@ let careDetailGeneration = 0;
 let careReminderLoadGeneration = 0;
 let carePersonaLoadGeneration = 0;
 let careReminderSaveInFlight = false;
+let careArchiveGeneration = 0;
+let careMemoryRunTimer = null;
+let carePendingGeneration = 0;
 
 function careText(value, fallback) {
   if (value === null || value === undefined || value === '') return fallback || '';
@@ -9737,15 +9772,139 @@ function renderCareMemoryDays(data) {
 function renderCarePending(data) {
   const items = careItems(data, ['items', 'pending', 'candidates']);
   carePendingItems = items;
-  careSetCount('care-pending-count', items.length + ' 条 · 只读待审');
+  careSetCount('care-pending-count', items.length + (data.read_only === false ? ' 条' : ' 条 · 只读待审'));
   careRenderItems('care-pending-content', items, '暂无待审候选 / No pending candidates', function(item) {
     const title = careText(careFirst(item, ['title', 'name', 'kind'], '自动记忆候选'));
     const body = careText(careFirst(item, ['content', 'text', 'summary'], ''));
     const meta = careText(careFirst(item, ['created_at', 'date', 'bucket_id', 'id'], ''));
     const index = carePendingItems.indexOf(item);
-    const detail = '<button type="button" data-care-action="detail" data-care-kind="pending" data-care-index="' + escAttr(index) + '">查看候选</button>';
+    const detail = '<button type="button" data-care-action="detail" data-care-kind="pending" data-care-index="' + escAttr(index) + '">查看候选</button>' + (data.read_only === false && item.status === 'pending' ? '<button type="button" data-care-action="review-memory" data-care-index="' + escAttr(index) + '">编辑与保留</button>' : '');
     return '<div class="care-item"><div class="care-item-title"><span>' + esc(title) + '</span>' + (meta ? '<span class="care-item-time">' + esc(meta) + '</span>' : '') + '</div>' + (body ? '<div class="care-item-body">' + esc(body) + '</div>' : '') + '<div class="care-item-actions">' + detail + '</div></div>';
   });
+}
+
+async function careMemoryPost(path, body) {
+  const response = await authFetch(BASE + path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (!response) throw new Error('需要重新登录');
+  const data = await readJsonSafe(response);
+  if (!response.ok || data.error) throw new Error(data.error || '请求失败');
+  return data;
+}
+
+function careRawRows(items) {
+  return items.length ? items.map(function(row) {
+    return '<article class="care-item"><div class="care-item-title">' + esc(row.role === 'user' ? '用户' : '助手') + ' <span class="care-item-time">' + esc(row.created_at || '') + '</span></div><div class="care-item-body">' + esc(row.text || '') + '</div><div class="care-card-meta">#' + esc(row.id) + ' · ' + esc(row.session_id || row.conversation_id || '') + '</div></article>';
+  }).join('') : '<div class="care-empty">没有匹配的原文</div>';
+}
+
+async function loadCareArchive() {
+  const generation = ++careArchiveGeneration;
+  const target = document.getElementById('care-archive-results');
+  const status = document.getElementById('care-archive-status');
+  const trace = document.getElementById('care-archive-mode').value === 'trace';
+  const params = new URLSearchParams({limit:'50', session_id:document.getElementById('care-archive-session').value.trim()});
+  if (!trace) {
+    params.set('q', document.getElementById('care-archive-query').value.trim());
+    ['since','until','role'].forEach(function(name) { params.set(name, document.getElementById('care-archive-' + name).value); });
+  }
+  target.innerHTML = '';
+  status.textContent = '查询中…';
+  try {
+    const data = await careFetchJson('/api/' + (trace ? 'gateway-injections' : 'search-raw') + '?' + params);
+    if (generation !== careArchiveGeneration) return;
+    const items = data.items || [];
+    status.textContent = items.length + ' 条记录';
+    target.innerHTML = !trace ? careRawRows(items) : (items.length ? items.map(function(row) {
+      const p = row.payload || {};
+      return '<article class="care-item"><div class="care-item-title">' + esc(row.session_id) + '<span class="care-item-time">' + esc(row.created_at) + '</span></div><div class="care-item-body">轮次 ' + esc(row.round_id) + '\n检索命中：' + esc((p.recalled_bucket_ids || []).join(', ') || '无') + '\n实际注入：' + esc((p.injected_bucket_ids || []).join(', ') || '无') + '\n心潮状态：' + (p.xinchao_context_injected ? '已注入' : '未注入') + '</div></article>';
+    }).join('') : '<div class="care-empty">暂无召回记录</div>');
+  } catch (error) {
+    if (generation === careArchiveGeneration) status.textContent = error.message;
+  }
+}
+
+async function reloadCarePending() {
+  const generation = ++carePendingGeneration;
+  const status = document.getElementById('care-pending-filter').value;
+  try {
+    const data = await careFetchJson('/api/daily-chat-memory/pending?limit=100&status=' + encodeURIComponent(status));
+    if (generation === carePendingGeneration) renderCarePending(data);
+  } catch (error) {
+    if (generation === carePendingGeneration) renderCareUnavailable('care-pending-content', error.message);
+  }
+}
+
+function openCareMemoryReview(index) {
+  const item = carePendingItems[Number(index)];
+  if (!item || item.status !== 'pending') return;
+  const generation = openCareDetail(item.title || '记忆候选', item.content);
+  const target = document.getElementById('detail-content');
+  target.innerHTML = '<h2>审阅记忆</h2><form class="care-editor" id="care-memory-editor"><label>标题<input name="title" maxlength="40" value="' + escAttr(item.title || '') + '" required></label><label>正文<textarea name="content" required>' + esc(item.content || '') + '</textarea></label><label>重要度<input name="importance" type="number" min="1" max="10" value="' + escAttr(item.importance || 5) + '"></label><div class="care-item-actions"><button type="button" id="care-memory-source"><i data-lucide="file-text"></i> 查看来源</button><button type="submit"><i data-lucide="check"></i> 保留</button><button type="button" id="care-memory-reject"><i data-lucide="x"></i> 舍弃</button></div><div id="care-memory-decision-status" role="status"></div></form><div id="care-memory-source-content" class="care-archive-output"></div>';
+  const form = document.getElementById('care-memory-editor');
+  const message = document.getElementById('care-memory-decision-status');
+  let busy = false;
+  const decide = async function(action) {
+    if (busy) return;
+    busy = true;
+    form.querySelectorAll('button').forEach(function(button) { button.disabled = true; });
+    message.textContent = '保存中…';
+    try {
+      const values = new FormData(form);
+      const edits = action === 'confirm' ? {[item.id]:{title:values.get('title'),content:values.get('content'),importance:Number(values.get('importance'))}} : {};
+      const result = await careMemoryPost('/api/daily-chat-memory/confirm', {candidate_ids:[item.id], action:action, edits:edits});
+      if (result.missing || (result.results || []).some(function(row) { return row.status === 'failed'; })) throw new Error('未能保存候选，请刷新后重试');
+      if (generation === careDetailGeneration) {
+        message.textContent = action === 'confirm' ? '已保留' : '已舍弃';
+        form.querySelectorAll('input,textarea').forEach(function(input) { input.disabled = true; });
+      }
+      await reloadCarePending();
+    } catch (error) {
+      if (generation === careDetailGeneration) {
+        message.textContent = error.message;
+        form.querySelectorAll('button').forEach(function(button) { button.disabled = false; });
+      }
+      busy = false;
+    }
+  };
+  form.addEventListener('submit', function(event) { event.preventDefault(); decide('confirm'); });
+  document.getElementById('care-memory-reject').addEventListener('click', function() { decide('reject'); });
+  document.getElementById('care-memory-source').addEventListener('click', async function() {
+    const output = document.getElementById('care-memory-source-content');
+    const ids = item.source_event_ids || [];
+    if (!ids.length) { output.textContent = '此候选没有原文事件引用'; return; }
+    output.textContent = '读取来源…';
+    try {
+      const result = await careFetchJson('/api/search-raw?limit=100&event_ids=' + encodeURIComponent(ids.join(',')));
+      if (generation === careDetailGeneration) output.innerHTML = careRawRows(result.items || []);
+    } catch (error) { if (generation === careDetailGeneration) output.textContent = error.message; }
+  });
+  if (window.lucide) lucide.createIcons();
+}
+
+async function pollCareMemoryRun() {
+  clearTimeout(careMemoryRunTimer);
+  const message = document.getElementById('care-memory-run-status');
+  const button = document.getElementById('care-memory-run-button');
+  try {
+    const data = await careFetchJson('/api/daily-chat-memory/run');
+    const running = data.status === 'running';
+    button.disabled = running;
+    const labels = {running:'生成中…', pending:'候选已生成', skipped:'未生成候选', error:'生成失败', interrupted:'任务已中断', idle:''};
+    message.textContent = (labels[data.status] || data.status) + (data.reason ? ' · ' + data.reason : '');
+    if (running) careMemoryRunTimer = setTimeout(pollCareMemoryRun, 3000);
+    else if (data.status === 'pending') await reloadCarePending();
+  } catch (error) { message.textContent = error.message; button.disabled = false; }
+}
+
+async function submitCareMemoryRun(event) {
+  event.preventDefault();
+  const button = document.getElementById('care-memory-run-button');
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    await careMemoryPost('/api/daily-chat-memory/run', {date:document.getElementById('care-memory-date').value, session_id:document.getElementById('care-memory-session').value.trim()});
+    await pollCareMemoryRun();
+  } catch (error) { document.getElementById('care-memory-run-status').textContent = error.message; button.disabled = false; }
 }
 
 async function loadCarePersonaForSession(sessionId) {
@@ -10037,13 +10196,16 @@ async function loadCareDashboard() {
   const reminderGeneration = ++careReminderLoadGeneration;
   const requestedPersonaSession = carePersonaSelectedSession;
   const personaGeneration = ++carePersonaLoadGeneration;
+  const pendingGeneration = ++carePendingGeneration;
+  const pendingFilter = document.getElementById('care-pending-filter');
+  const requestedPendingStatus = pendingFilter ? pendingFilter.value : 'pending';
   const status = document.getElementById('care-status');
   if (status) { status.textContent = '读取中… / Loading…'; status.classList.add('care-refreshing'); }
   const jobs = [
     ['reminders', '/api/reminders?status=' + encodeURIComponent(requestedReminderStatus) + '&limit=50', renderCareReminders, 'care-reminders-content'],
     ['moments', '/api/moments?limit=200', renderCareMoments, 'care-moments-content'],
     ['memory-days', '/api/buckets?sort=created_asc', renderCareMemoryDays, 'care-moments-content'],
-    ['pending', '/api/daily-chat-memory/pending?status=pending&limit=12', renderCarePending, 'care-pending-content'],
+    ['pending', '/api/daily-chat-memory/pending?status=' + encodeURIComponent(requestedPendingStatus) + '&limit=100', renderCarePending, 'care-pending-content'],
     ['dreams', '/api/dreams?limit=8', renderCareDreams, 'care-dreams-content'],
     ['persona', '/api/persona?events_limit=8&sessions_limit=4' + (requestedPersonaSession ? '&session_id=' + encodeURIComponent(requestedPersonaSession) : ''), renderCarePersona, 'care-persona-content'],
     ['portrait', '/api/portrait-state', renderCarePortrait, 'care-portrait-content'],
@@ -10054,6 +10216,7 @@ async function loadCareDashboard() {
     if (generation !== careLoadGeneration) return false;
     if (name === 'reminders' && (reminderGeneration !== careReminderLoadGeneration || requestedReminderStatus !== careReminderStatus)) return false;
     if (name === 'persona' && (personaGeneration !== carePersonaLoadGeneration || requestedPersonaSession !== carePersonaSelectedSession)) return false;
+    if (name === 'pending' && pendingGeneration !== carePendingGeneration) return false;
     return true;
   };
   jobs.forEach(function(job) { if (!(job[0] in careCalendarLoadState)) careLoading(job[3]); });
@@ -10144,6 +10307,17 @@ function wireCareControls() {
   };
   bind('#care-refresh-button', function() { loadCareDashboard(); });
   bind('#care-portrait-initialize', initializeCarePortrait);
+  bind('#care-pending-refresh', function() { reloadCarePending(); pollCareMemoryRun(); });
+  const pendingFilter = root.querySelector('#care-pending-filter');
+  if (pendingFilter) pendingFilter.addEventListener('change', reloadCarePending);
+  const runForm = root.querySelector('#care-memory-run-form');
+  if (runForm) runForm.addEventListener('submit', submitCareMemoryRun);
+  const archiveForm = root.querySelector('#care-archive-form');
+  if (archiveForm) archiveForm.addEventListener('submit', function(event) { event.preventDefault(); loadCareArchive(); });
+  const archiveMode = root.querySelector('#care-archive-mode');
+  if (archiveMode) archiveMode.addEventListener('change', function() {
+    ['query', 'since', 'until', 'role'].forEach(function(name) { document.getElementById('care-archive-' + name).disabled = archiveMode.value === 'trace'; });
+  });
   bind('#care-reminder-add-button', function() {
     toggleCareReminderForm(null);
   });
@@ -10167,6 +10341,7 @@ function wireCareControls() {
     else if (action === 'patch-reminder') careReminderPatch(id, {status: button.getAttribute('data-care-status') || 'active'});
     else if (action === 'snooze-reminder') careReminderPatch(id, {snooze_minutes: 30});
     else if (action === 'open-dream') openCareDream(id);
+    else if (action === 'review-memory') openCareMemoryReview(button.getAttribute('data-care-index'));
   });
   bind('#care-moments-prev-button', function() { shiftCareMomentsMonth(-1); });
   bind('#care-moments-next-button', function() { shiftCareMomentsMonth(1); });

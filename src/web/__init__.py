@@ -35,6 +35,7 @@ from . import v3_debug
 from . import them
 from . import you
 from . import legacy_compat
+from . import gateway_memory
 
 
 _WEB_MODULES = (
@@ -59,6 +60,7 @@ _WEB_MODULES = (
     ("web.them", them.register),
     ("web.you", you.register),
     ("web.legacy_compat", legacy_compat.register),
+    ("web.gateway_memory", gateway_memory.register),
 )
 
 

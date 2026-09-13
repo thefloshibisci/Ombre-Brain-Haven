@@ -221,10 +221,10 @@ def test_entrypoint_prefers_explicit_proxy_port(monkeypatch):
     "/api/daily-chat-memory/run",
     "/api/daily-chat-memory/confirm",
 ])
-def test_gateway_owned_dashboard_paths_route_to_gateway(monkeypatch, path):
-    monkeypatch.setenv("OMBRE_GATEWAY_URL", "http://gateway.internal")
+def test_dashboard_paths_keep_brain_session_authentication(monkeypatch, path):
+    monkeypatch.setenv("OMBRE_BRAIN_URL", "http://brain.internal")
     target, forwarded = proxy_server._target_for_path(path)
-    assert target == "http://gateway.internal"
+    assert target == "http://brain.internal"
     assert forwarded == path
 
 

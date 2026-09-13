@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
+import pytest
 
 from raw_events import RawEventStore
 
@@ -73,3 +75,21 @@ def test_raw_store_rejects_non_dialogue_and_injected_context(tmp_path: Path) -> 
     assert result["inserted"] == 0
     assert result["rejected"] == 2
     assert {item["reason"] for item in result["items"]} == {"invalid_role", "injected_context"}
+
+
+def test_archive_read_never_recreates_a_missing_database(tmp_path):
+    store = _store(tmp_path)
+    path = Path(store.db_path)
+    path.unlink()
+    with pytest.raises(sqlite3.OperationalError):
+        store.search()
+    assert not path.exists()
+
+
+def test_archive_timezones_and_source_ids_filter_before_limit(tmp_path):
+    store = _store(tmp_path)
+    first = store.ingest([{"role":"user","text":"boundary","session_id":"A", "created_at":"2026-09-12T16:00:00Z"}], source="gateway")
+    store.ingest([{"role":"user","text":"other","session_id":"B", "created_at":"2026-09-13T12:00:00+08:00"}], source="gateway")
+    found = store.search(since="2026-09-13T00:00:00+08:00", until="2026-09-13T23:59:59+08:00", session_id="A", limit=1)
+    assert [item["text"] for item in found["items"]] == ["boundary"]
+    assert store.search(event_ids=[first["items"][0]["id"]])["items"][0]["session_id"] == "A"

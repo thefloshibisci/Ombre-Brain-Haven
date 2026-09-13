@@ -53,6 +53,58 @@ def make_service(config):
 
 
 @pytest.mark.asyncio
+async def test_candidate_decision_is_persisted_idempotent_and_current_brain_readable(care_config):
+    service = make_service(care_config)
+    engine = care_scheduler.ReflectionEngine(care_config)
+    candidate = {"id":"chat_memory_20260913_test", "date":"2026-09-13", "content":"A durable shared memory.", "title":"Shared memory", "kind":"key_event", "source_event_ids":[17]}
+    engine._store_daily_chat_memory_pending([candidate])
+    scheduler = CareScheduler(service)
+    result = await scheduler.confirm_daily_chat_memory([candidate["id"]], edits={candidate["id"]:{"content":"Edited durable shared memory."}})
+    assert result["created"] == 1
+    assert (await scheduler.confirm_daily_chat_memory([candidate["id"]]))["created"] == 0
+    assert engine._load_daily_chat_memory_pending()[0]["status"] == "confirmed"
+    from bucket_manager import BucketManager as CurrentBucketManager
+    current = CurrentBucketManager(care_config)
+    bucket = await current.get(candidate["id"])
+    assert bucket["content"] == "Edited durable shared memory."
+    assert bucket["metadata"]["source_raw_event_ids"] == [17]
+
+
+def test_pending_queue_retains_all_undecided_and_rejects_corruption(care_config):
+    engine = care_scheduler.ReflectionEngine(care_config)
+    engine._save_daily_chat_memory_pending([{"id":str(i),"status":"pending"} for i in range(620)])
+    assert len(engine._load_daily_chat_memory_pending()) == 620
+    path = Path(engine.daily_chat_memory_pending_path)
+    path.write_text('{broken', encoding='utf-8')
+    with pytest.raises(ValueError):
+        engine._store_daily_chat_memory_pending([{"id":"new"}])
+    assert path.read_text(encoding='utf-8') == '{broken'
+
+
+@pytest.mark.asyncio
+async def test_scoped_generation_excludes_other_sessions_and_preserves_global_cursor(care_config, monkeypatch):
+    cfg = care_config["reflection"]
+    cfg["daily_chat_memory_mode"] = "review"
+    service = make_service(care_config)
+    service.state_store = gateway.GatewayStateStore(str(Path(care_config["state_dir"]) / "gateway.sqlite"))
+    service.raw_event_store = gateway.RawEventStore(care_config)
+    service.raw_event_store.ingest([
+        {"role":"user", "text":"Chosen source", "session_id":"A", "created_at":"2026-09-13T12:00:00+08:00"},
+        {"role":"user", "text":"Excluded source", "session_id":"B", "created_at":"2026-09-13T12:00:00+08:00"},
+    ], source="gateway")
+    summarize = AsyncMock(return_value=[])
+    extract = AsyncMock(return_value=[])
+    monkeypatch.setattr(care_scheduler.ReflectionEngine, "_summarize_daily_chat_memory_windows", summarize)
+    monkeypatch.setattr(care_scheduler.ReflectionEngine, "_extract_daily_chat_memory_candidates", extract)
+    scheduler = CareScheduler(service)
+    await scheduler.run_daily_chat_memory(key="2026-09-13", mode="review", session_id="A")
+    material = json.dumps(summarize.call_args.args)
+    assert "Chosen source" in material and "Excluded source" not in material
+    engine = care_scheduler.ReflectionEngine(care_config)
+    assert engine._daily_chat_memory_last_raw_event_id("default") == 0
+
+
+@pytest.mark.asyncio
 async def test_daily_generation_is_readable_by_current_brain_and_idempotent(care_config, monkeypatch):
     service = make_service(care_config)
     from bucket_manager import BucketManager as CurrentBucketManager
