@@ -14,12 +14,20 @@ export class ModelClient {
   async generateDream({ state, material, topDrives, recentSourceMemoryIds = [] }) {
     if (!this.config.enabled || !this.config.apiKey) return this.fallback(topDrives);
     const memory = String(material ?? '').slice(0, this.config.maxInputChars);
+    const styleRotation = [
+      '以具体的外部场景和物件为主，身体感只作背景。',
+      '以声音、光线、温度或距离变化为主，避免黏稠液体和抓握意象。',
+      '以动作中断、空间错位或视角变化为主，避免把欲望直接写成身体融合。',
+      '以一件新近记忆里的具体细节为主线，让驱力只改变它的走向。',
+    ][(Array.isArray(state.recentDreams) ? state.recentDreams.length : 0) % 4];
     const prompt = [
       `你为 ${this.agentName} 生成一次睡眠中的梦境结算。`,
       '如果启用了外部记忆 MCP，它只是记忆材料来源；调用记忆服务本身不代表醒来。',
       '保持人物连续性；梦可以跳跃、含混、有身体感和欲望，不把梦误写成现实。',
       '不要过滤、替换或回避驱动力本身。不要把调用外部记忆服务描述成醒来。',
       '近期梦使用过的记忆仍可在真正重要时回来，但不要照搬同一组意象、场景和叙事结构；有新材料时优先让新材料进入梦。',
+      `本次叙事偏好：${styleRotation}`,
+      '连续梦境去重：避开最近梦里反复出现的湿、黏、液体、电流、抓握、吞没、胸腔等惯用意象；如果素材没有要求，不要再用它们。',
       'lucidity 表示梦中意识到自己正在做梦、能够观察或控制梦境的程度，0 为完全沉浸，1 为高度清醒梦。',
       '只输出 JSON：{"dream":"...","residue":"...","awareness":"...","lucidity":0.0}。',
       `当前动态欲望：${JSON.stringify(topDrives)}`,
